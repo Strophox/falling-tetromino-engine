@@ -771,10 +771,10 @@ fn do_player_button_update(
             let rel_one = old_ml && old_mr && !is_prs;
             let rel_just_ml = rel_one
                 && is_ml
-                && state.buttons_pressed[B::MoveLeft] < state.buttons_pressed[B::MoveRight]; // ←₋→₊ⁱ
+                && state.buttons_pressed[B::MoveLeft] > state.buttons_pressed[B::MoveRight]; // ←₋→₊ⁱ
             let rel_just_mr = rel_one
                 && !is_ml
-                && state.buttons_pressed[B::MoveLeft] > state.buttons_pressed[B::MoveRight]; // ←₊→₋ⁱ
+                && state.buttons_pressed[B::MoveLeft] < state.buttons_pressed[B::MoveRight]; // ←₊→₋ⁱ
 
             let initiate_m = prs_ml || prs_mr || rel_just_ml || rel_just_mr;
 

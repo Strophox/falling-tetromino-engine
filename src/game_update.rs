@@ -628,7 +628,7 @@ fn do_player_button_update(
     //
     // ## Falling
     //
-    // The fall timer is influenced as follows¹:
+    // The fall timer is influenced as follows ¹:
     // - refreshed falltimer  if  (grounded ~> airborne)ᵃ
     // - refreshed falltimer  if  (_ ~> airborne) + soft drop just pressed
     // - refreshed falltimer  if  (_ ~> airborne) + soft drop just released
@@ -636,7 +636,7 @@ fn do_player_button_update(
     //
     // ## Locking
     //
-    // The lock timer is influenced as follows²:
+    // The lock timer is influenced as follows ²:
     // - zero locktimer  if  (grounded ~> grounded) + soft drop just pressed
     // - zero locktimer  if  (_ ~> grounded) + hard drop just pressed
     // - refreshed locktimer  if  (_ ~> grounded) + (position|orientation) just changedᵇ
@@ -646,47 +646,37 @@ fn do_player_button_update(
     //
     // We analyze cases:
     //
-    // Table 1.: Karnaugh map⁵.
-    // +-----------+-------------------------------------+
-    // |           |   Rel.   Rel.   Prs.   Prs.   Any
-    // | Old state |    mr     ml     ml     mr    Other
-    // +           +-------------------------------------+
-    // |   ¬ml ¬mr |    |-|    |-|     ←₊ⁱ    →₊ⁱ   |-|
-    // |   ¬ml  mr |   →₋ᵏ     |→|   →₋←₊ⁱ   |→|    |→|
-    // |    ml  mr |   ⇆₋←₊ⁱ  ⇆₋→₊ⁱ   |⇆|    |⇆|    |⇆|   // FIXME:  ml&&mr + Prs.ml might still want to initiate a move?..
-    // |    ml ¬mr |    |←|   ←₋ᵏ     |←|   ←₋→₊ⁱ   |←|
-    // +-----------+-------------------------------------+
+    // Table 1.: Karnaugh map ⁵.
+    // +-----------+-----------------------------------------+
+    // |           |   Rel.    Rel.    Prs.    Prs.     Any
+    // | Old state |    mr      ml      ml      mr     Other
+    // +           +-----------------------------------------+
+    // |   ¬ml ¬mr |  | - |?  | - |?   ←₊  ⁱ     →₊ⁱ   | - |
+    // |   ¬ml  mr |     →₋ᵏ    |→|?   ←₊→₋ⁱ    |→|?     |→|
+    // |    ml< mr |   ←₊→₋ⁱ    |→|   |←|?    |←|?       |→|
+    // |    ml> mr |  |←|      ←₋→₊ⁱ  |←|?    |←|?     |←|    // FIXME:  ml&&mr + Prs.ml might still want to initiate a move?..
+    // |    ml ¬mr |  |←|?     ←₋ᵏ    |←|?     ←₋→₊ⁱ   |←|
+    // +-----------+-----------------------------------------+
     // |  '-' = not moving      'X₋  ' = stop X
     // |  '←' = moving left     '  X₊' = start X
-    // |  '→' = moving right    ' |X|' = keep X
-    // |  '⇆' = moving <direction depending
-    // |                on previous timing>
-    // |  ᵏ: cease autonomous moves
+    // |  '→' = moving right    '|X| ' = keep X
     // |  ⁱ: immediate move + refresh autonomous moves
-    // +-------------------------------------------------+
-    //
-    // Table 2.: Comparing with `dx` instead.
-    // +--------+-------------------------------------+
-    // | Old dx |   Rml    Rmr    Pml    Pmr    Other
-    // +        +-------------------------------------+
-    // | ← = -1 |  ←₋¿→₊    |←|    |←|   ←₋→₊     |←|
-    // | - =  0 |    | |    | |     ←₊     →₊     | |
-    // | → =  1 |    |→|  →₋¿←₊   →₋←₊    |→|     |→|
-    // +--------+-------------------------------------+XXXXXXXXXXXXXx
+    // |  ᵏ: cease autonomous moves
+    // +-----------------------------------------------------+
     //
     // ### Moving
     //
-    // The (ⁱ)/(ᵏ)-entries of Table 1 are the major effects of move inputs to be implemented³:
+    // The (ⁱ)/(ᵏ)-entries of Table 1 are the major effects of move inputs to be implemented ³:
     // - immediate move + refreshed movetimer  if  (ⁱ)
     // - removed movetimer  if  (ᵏ)
     //
     // Otherwise we should implement:
-    // - old movetimer  if   no change like in (ⁱ)/(ᵏ)
+    // - old movetimer  if  no change like in (ⁱ)/(ᵏ)
     //
     // ### Move Resumption
     //
     // We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
-    // the piece should move immediately as soon as it is unstuck (e.g. once fallen below the obstruction)⁴.
+    // the piece should move immediately as soon as it is unstuck (e.g. once fallen below the obstruction) ⁴.
     // This system takes effect in the non-(ⁱ)/(ᵏ)-entries of Table 1.
     // However, it has to be computed after another event has been handled that may be cause of unobstruction.
 
@@ -775,19 +765,32 @@ fn do_player_button_update(
             let is_prs = matches!(button_change, BC::Press(_));
             let is_ml = matches!(dir, B::MoveLeft);
 
-            let rel_one = old_ml && old_mr && !is_prs; // ⇆₋←₊ⁱ, ⇆₋→₊ⁱ
-            let prs_ml = !old_ml && is_prs && is_ml; // ←₊ⁱ; →₋←₊ⁱ
+            let prs_ml = !old_ml && is_prs && is_ml; // ←₊ⁱ; ←₊→₋ⁱ
             let prs_mr = !old_mr && is_prs && !is_ml; // →₊ⁱ; ←₋→₊ⁱ
-            let rel_ml = old_ml && !old_mr && !is_prs && is_ml; // ←₋ᵏ
-            let rel_mr = !old_ml && old_mr && !is_prs && !is_ml; // →₋ᵏ
-            maybe_override_auto_move = if rel_one || prs_ml || prs_mr {
+
+            let rel_one = old_ml && old_mr && !is_prs;
+            let rel_just_ml = rel_one
+                && is_ml
+                && state.buttons_pressed[B::MoveLeft] < state.buttons_pressed[B::MoveRight]; // ←₋→₊ⁱ
+            let rel_just_mr = rel_one
+                && !is_ml
+                && state.buttons_pressed[B::MoveLeft] > state.buttons_pressed[B::MoveRight]; // ←₊→₋ⁱ
+
+            let initiate_m = prs_ml || prs_mr || rel_just_ml || rel_just_mr;
+
+            let rel_remaining_ml = old_ml && !old_mr && !is_prs && is_ml; // ←₋ᵏ
+            let rel_remaining_mr = !old_ml && old_mr && !is_prs && !is_ml; // →₋ᵏ
+
+            let cancel_m = rel_remaining_ml || rel_remaining_mr;
+
+            maybe_override_auto_move = if initiate_m {
                 if let Some(moved_piece) = new_piece.fits_at(&state.board, (dx, 0)) {
                     new_piece = moved_piece;
                     Some(Some(next_move_time)) // Able to do relevant move; Insert autonomous movement.
                 } else {
                     Some(None) // Unable to move; Remove autonomous movement.
                 }
-            } else if rel_mr || rel_ml {
+            } else if cancel_m {
                 Some(None) // Buttons unpressed: Remove autonomous movement.
             } else {
                 None // No relevant button state changes: Do not change autonomous movement.

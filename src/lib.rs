@@ -908,7 +908,7 @@ impl Default for Configuration {
             delayed_auto_shift: Duration::from_millis(167),
             auto_repeat_rate: Duration::from_millis(33),
             fall_delay_params: DelayParameters::constant(Duration::from_millis(1000).into()),
-            soft_drop_divisor: ExtNonNegF64::new(10.0).unwrap(),
+            soft_drop_divisor: ExtNonNegF64::new(15.0).unwrap(),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
             lenient_lock_delay_reset: false,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),

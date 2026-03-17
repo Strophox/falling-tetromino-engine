@@ -11,8 +11,10 @@ pub enum RotationSystem {
     /// The self-developed 'Ocular' rotation system.
     #[default]
     Ocular,
-    /// The right-handed variant of the classic, kick-less rotation system used in NES Tetris.
-    Classic,
+    /// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
+    ClassicL,
+    /// The right-handed variant of the classic, kick-less rotation system, e.g. used in the NES version.
+    ClassicR,
     /// The Super Rotation System.
     Super,
 }
@@ -25,7 +27,8 @@ impl RotationSystem {
     pub fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         match self {
             RotationSystem::Ocular => ocular_rotate(piece, board, right_turns),
-            RotationSystem::Classic => classic_rotate(piece, board, right_turns),
+            RotationSystem::ClassicL => classicl_rotate(piece, board, right_turns),
+            RotationSystem::ClassicR => classicr_rotate(piece, board, right_turns),
             RotationSystem::Super => super_rotate(piece, board, right_turns),
         }
     }
@@ -236,6 +239,78 @@ fn ocular_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>
     }
 }
 
+fn classicl_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    let left_rotation = match right_turns.rem_euclid(4) {
+        // No rotation occurred.
+        0 => return Some(*piece),
+        // One right rotation.
+        1 => false,
+        // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
+        2 => {
+            return piece.fits_at_reoriented(board, (0, 0), 2);
+        }
+        // One left rotation.
+        3 => true,
+        _ => unreachable!(),
+    };
+    use Orientation::*;
+    #[rustfmt::skip]
+    let kick = match piece.tetromino {
+        Tetromino::O => (0, 0), // ⠶
+        Tetromino::I => match piece.orientation {
+            N | S => (1, -1), // ⠤⠤ -> ⡇
+            E | W => (-1, 1), // ⡇  -> ⠤⠤
+        },
+        Tetromino::S | Tetromino::Z => match piece.orientation {
+            N | S => (0, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
+            E | W => (0, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
+        },
+        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
+            N => if left_rotation { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
+            E => if left_rotation { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
+            S => if left_rotation { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
+            W => if left_rotation { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
+        },
+    };
+    piece.fits_at_reoriented(board, kick, right_turns)
+}
+
+fn classicr_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    let left_rotation = match right_turns.rem_euclid(4) {
+        // No rotation occurred.
+        0 => return Some(*piece),
+        // One right rotation.
+        1 => false,
+        // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
+        2 => {
+            return piece.fits_at_reoriented(board, (0, 0), 2);
+        }
+        // One left rotation.
+        3 => true,
+        _ => unreachable!(),
+    };
+    use Orientation::*;
+    #[rustfmt::skip]
+    let kick = match piece.tetromino {
+        Tetromino::O => (0, 0), // ⠶
+        Tetromino::I => match piece.orientation {
+            N | S => (2, -1), // ⠤⠤ -> ⡇
+            E | W => (-2, 1), // ⡇  -> ⠤⠤
+        },
+        Tetromino::S | Tetromino::Z => match piece.orientation {
+            N | S => (1, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
+            E | W => (-1, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
+        },
+        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
+            N => if left_rotation { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
+            E => if left_rotation { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
+            S => if left_rotation { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
+            W => if left_rotation { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
+        },
+    };
+    piece.fits_at_reoriented(board, kick, right_turns)
+}
+
 fn super_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
     let left = match right_turns.rem_euclid(4) {
         // No rotation occurred.
@@ -286,40 +361,4 @@ fn super_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> 
         },
     };
     piece.first_fit(board, kick_table.iter().copied(), right_turns)
-}
-
-fn classic_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
-    let left_rotation = match right_turns.rem_euclid(4) {
-        // No rotation occurred.
-        0 => return Some(*piece),
-        // One right rotation.
-        1 => false,
-        // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
-        2 => {
-            return piece.fits_at_reoriented(board, (0, 0), 2);
-        }
-        // One left rotation.
-        3 => true,
-        _ => unreachable!(),
-    };
-    use Orientation::*;
-    #[rustfmt::skip]
-    let kick = match piece.tetromino {
-        Tetromino::O => (0, 0), // ⠶
-        Tetromino::I => match piece.orientation {
-            N | S => (2, -1), // ⠤⠤ -> ⡇
-            E | W => (-2, 1), // ⡇  -> ⠤⠤
-        },
-        Tetromino::S | Tetromino::Z => match piece.orientation {
-            N | S => (1, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
-            E | W => (-1, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
-        },
-        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
-            N => if left_rotation { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
-            E => if left_rotation { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
-            S => if left_rotation { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
-            W => if left_rotation { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
-        },
-    };
-    piece.fits_at_reoriented(board, kick, right_turns)
 }

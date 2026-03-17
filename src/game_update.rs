@@ -10,12 +10,12 @@ impl Game {
     /// This will cause an internal update of the game's state up to and including the given
     /// `update_target_time` requested.
     /// If `button_changes` is nonempty, then the same thing happens except that the `button_changes`
-    /// Will be used at `update_target_time` to update the state (which might cause some
-    /// further events that are handled at `update_time`) before finally returning.
+    /// will be used at `update_target_time` after all autonomous updates are processed;
+    /// The `button_changes` may then cause additional updates / interactions (which are also
+    /// handled exhaustively) before finally returning with in-game time at `update_time`.
     ///
     /// Unless an error occurs, this function will return all [`FeedbackMsg`]s caused between the
-    /// previous and the current `update` call, in chronological order;
-    /// It will also return a `bool` flag to signify whether game can be continued (i.e. has not ended).
+    /// previous and the current `update` call, in chronological order.
     ///
     /// # Errors
     ///

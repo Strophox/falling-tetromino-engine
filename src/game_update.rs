@@ -1088,6 +1088,9 @@ fn do_lock(
     }
 }
 
+// FIXME: Currently, this function returns ostensibly harmless sentinels in the case
+// that we can't logically decide which direction to move. This should be handled
+// more gracefully / with types alone / in a way that can't accidentally go wrong.
 fn calc_move_dx_and_next_move_time(
     config: &Configuration,
     button_state: &[Option<InGameTime>; Button::VARIANTS.len()],
@@ -1102,7 +1105,7 @@ fn calc_move_dx_and_next_move_time(
             // 'Right' was pressed more recently, go right.
             std::cmp::Ordering::Less => (1, move_time.saturating_sub(time_prsd_right)),
             // Both pressed at exact same time, don't move.
-            std::cmp::Ordering::Equal => (0, Duration::ZERO),
+            std::cmp::Ordering::Equal => return (0, Duration::MAX),
             // 'Left' was pressed more recently, go left.
             std::cmp::Ordering::Greater => (-1, move_time.saturating_sub(time_prsd_left)),
         },
@@ -1111,7 +1114,7 @@ fn calc_move_dx_and_next_move_time(
         // Only 'right' pressed.
         (None, Some(time_prsd_right)) => (1, move_time.saturating_sub(time_prsd_right)),
         // None pressed. No movement.
-        (None, None) => (0, Duration::ZERO),
+        (None, None) => return (0, Duration::MAX),
     };
 
     let next_move_scheduled = move_time.saturating_add(

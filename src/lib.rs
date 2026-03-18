@@ -17,18 +17,18 @@ let mut game = Game::builder()
 
 // Updating the game with the info that 'left' should be pressed at second 5.0;
 // If a piece is in the game, it will try to move left.
-let button_change = ButtonChange::Press(Button::MoveLeft);
-game.update(GameTime::from_secs(5.0), Some(button_change));
+let input = Input::Activate(Button::MoveLeft);
+game.update(InGameTime::from_secs(5.0), Some(input));
 
 // ...
 
 // Updating the game with the info that no input change has occurred up to second 7.0;
 // This updates the game, e.g., pieces fall.
-game.update(GameTime::from_secs(7.0), None);
+game.update(InGameTime::from_secs(7.0), None);
 
 // Read most recent game state;
 // This is how a UI can know how to render the board, etc.
-let GameState { board, .. } = game.state();
+let State { board, .. } = game.state();
 ```
 
 FIXME: Document *all* features in detail (including IRS, etc., cargo feature `serde` etc.).
@@ -71,7 +71,7 @@ pub type InGameTime = Duration;
 pub type GameRng = ChaCha12Rng;
 /// Type of underlying functions at the heart of a [`Modifier`].
 pub type GameModFn = dyn FnMut(
-    &mut UpdatePoint<&mut Option<ButtonChange>>,
+    &mut UpdatePoint<&mut Option<Input>>,
     &mut Configuration,
     &StateInitialization,
     &mut State,
@@ -252,6 +252,10 @@ pub struct Configuration {
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
     pub lenient_lock_delay_reset: bool,
+    /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
+    /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
+    /// This allows DAS and ARR to function at extreme game speeds.
+    pub ensure_move_delay_lt_lock_delay: bool,
     /// How long each spawned active piece may touch the ground in total until it should lock down
     /// immediately.
     pub lock_reset_cap_factor: ExtNonNegF64,
@@ -320,11 +324,11 @@ pub enum Button {
 /// A change in button state, between being held down or unpressed.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ButtonChange {
-    /// The signal of a button now being active / 'pressed down'.
-    Press(Button),
-    /// The signal of a button now being inactive / 'not pressed down'.
-    Release(Button),
+pub enum Input {
+    /// The signal of a button now being activated.
+    Activate(Button),
+    /// The signal of a button now being deactivated.
+    Deactivate(Button),
 }
 
 /// Struct storing internal game state that changes over the course of play.
@@ -438,7 +442,7 @@ pub enum UpdatePoint<T> {
     /// Represents a `Game::update` call handling [`Phase::PieceInPlay`], specifically a piece locking down.
     PieceLocked,
     /// Represents a `Game::update` call handling [`Phase::PieceInPlay`], specifically an update ([`ButtonChange`]) to the state of [`Button`]s by the player.
-    PiecePlayed(ButtonChange),
+    PiecePlayed(Input),
     /// Represents a `Game::update` call handling [`Phase::LinesClearing`].
     LinesCleared,
     /// Represents a `Game::update` call at a general point at the head of the main loop.
@@ -911,6 +915,7 @@ impl Default for Configuration {
             soft_drop_divisor: ExtNonNegF64::new(15.0).unwrap(),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
             lenient_lock_delay_reset: false,
+            ensure_move_delay_lt_lock_delay: false,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,

@@ -9,10 +9,10 @@ impl Game {
     ///
     /// This will cause an internal update of the game's state up to and including the given
     /// `update_target_time` requested.
-    /// If `button_changes` is nonempty, then the same thing happens except that the `button_changes`
+    /// If `input` is nonempty, then the same thing happens except that the `input`
     /// will be used at `update_target_time` after all autonomous updates are processed;
-    /// The `button_changes` may then cause additional updates / interactions (which are also
-    /// handled exhaustively) before finally returning with in-game time at `update_time`.
+    /// The `input` may then cause additional updates / interactions (which are also
+    /// handled exhaustively) before finally returning with in-game time at `target_time`.
     ///
     /// Unless an error occurs, this function will return all [`FeedbackMsg`]s caused between the
     /// previous and the current `update` call, in chronological order.
@@ -22,12 +22,12 @@ impl Game {
     /// This function may error with:
     /// - [`UpdateGameError::GameEnded`] if `game.ended()` is `true`, indicating that no more updates
     ///   can change the game state, or
-    /// - [`UpdateGameError::TargetTimeInPast`] if `update_time < game.state().time`, indicating that
+    /// - [`UpdateGameError::TargetTimeInPast`] if `target_time < game.state().time`, indicating that
     ///   the requested update lies in the past.
     pub fn update(
         &mut self,
         target_time: InGameTime,
-        mut button_changes: Option<ButtonChange>,
+        mut input: Option<Input>,
     ) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
         if target_time < self.state.time {
             // Do not allow updating if target time lies in the past.
@@ -39,11 +39,9 @@ impl Game {
 
         // Prepare new button state.
         let mut new_state_buttons_pressed = self.state.buttons_pressed;
-        match button_changes {
-            Some(ButtonChange::Press(button)) => {
-                new_state_buttons_pressed[button] = Some(target_time)
-            }
-            Some(ButtonChange::Release(button)) => new_state_buttons_pressed[button] = None,
+        match input {
+            Some(Input::Activate(button)) => new_state_buttons_pressed[button] = Some(target_time),
+            Some(Input::Deactivate(button)) => new_state_buttons_pressed[button] = None,
             None => {}
         }
 
@@ -55,10 +53,7 @@ impl Game {
             if let Some(new_phase) = self.try_end_game_if_end_condition_met() {
                 self.phase = new_phase;
             }
-            self.run_mods(
-                UpdatePoint::MainLoopHead(&mut button_changes),
-                &mut feedback_msgs,
-            );
+            self.run_mods(UpdatePoint::MainLoopHead(&mut input), &mut feedback_msgs);
 
             match self.phase {
                 // Game ended by now.
@@ -147,15 +142,15 @@ impl Game {
                 }
 
                 // Piece acted upon by player.
-                Phase::PieceInPlay { piece_data } if button_changes.is_some() => {
-                    let Some(button_change) = button_changes.take() else {
+                Phase::PieceInPlay { piece_data } if input.is_some() => {
+                    let Some(input) = input.take() else {
                         unreachable!()
                     };
-                    self.phase = do_player_button_update(
+                    self.phase = do_player_input(
                         &self.config,
                         &mut self.state,
                         piece_data,
-                        button_change,
+                        input,
                         new_state_buttons_pressed,
                         target_time,
                         &mut feedback_msgs,
@@ -163,7 +158,7 @@ impl Game {
                     self.state.time = target_time;
                     self.state.buttons_pressed = new_state_buttons_pressed;
 
-                    self.run_mods(UpdatePoint::PiecePlayed(button_change), &mut feedback_msgs);
+                    self.run_mods(UpdatePoint::PiecePlayed(input), &mut feedback_msgs);
                 }
 
                 // No actions within update target horizon, stop updating.
@@ -208,7 +203,7 @@ impl Game {
     /// Goes through all internal 'game mods' and applies them sequentially at the given [`ModifierPoint`].
     fn run_mods(
         &mut self,
-        mut update_point: UpdatePoint<&mut Option<ButtonChange>>,
+        mut update_point: UpdatePoint<&mut Option<Input>>,
         feedback_msgs: &mut Vec<FeedbackMsg>,
     ) {
         if self.config.feedback_verbosity == FeedbackVerbosity::Debug {
@@ -400,22 +395,19 @@ fn do_line_clearing(
     }
 }
 
-fn check_piece_became_movable_get_moved_piece_and_move_scheduled(
-    old_piece: Piece,
-    new_piece: Piece,
+fn check_piece_became_movable_get_moved_piece(
+    prev_piece: Piece,
+    next_piece: Piece,
     board: &Board,
-    (dx, next_move_time): (isize, InGameTime),
-) -> Option<(Piece, Option<InGameTime>)> {
-    // Do not check 'no movement'.
-    if dx == 0 {
-        return None;
-    }
-    let old_piece_moved = old_piece.fits_at(board, (dx, 0));
-    let new_piece_moved = new_piece.fits_at(board, (dx, 0));
-    if let (None, Some(moved_piece)) = (old_piece_moved, new_piece_moved) {
-        Some((moved_piece, Some(next_move_time)))
+    dx: isize,
+) -> Option<Piece> {
+    let moved_prev_piece = prev_piece.fits_at(board, (dx, 0));
+    let moved_next_piece = next_piece.fits_at(board, (dx, 0));
 
-    // All checks passed, no changes need to be made.
+    if let (None, Some(valid_moved_piece)) = (moved_prev_piece, moved_next_piece) {
+        Some(valid_moved_piece)
+
+    // No changes need to be made after all.
     // This is the case where neither (³) or (⁴) apply.
     } else {
         None
@@ -429,18 +421,33 @@ fn do_autonomous_move(
     auto_move_time: InGameTime,
 ) -> Phase {
     // Move piece and update all appropriate piece-related values.
-    // NOTE: This should give non-zero `dx`.
-    let (dx, next_move_time) =
-        calc_move_dx_and_next_move_time(config, &state.buttons_pressed, auto_move_time);
 
     let mut new_piece = previous_piece_data.piece;
-    let new_auto_move_scheduled =
+
+    let ensure_lt_lock_delay = (config.ensure_move_delay_lt_lock_delay
+        && !previous_piece_data.is_fall_not_lock)
+        .then_some(state.lock_delay);
+
+    let opt_dx_and_next_move_time = calc_move_direction_and_next_move_time(
+        config,
+        &state.buttons_pressed,
+        auto_move_time,
+        ensure_lt_lock_delay,
+    );
+
+    let new_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time {
         if let Some(moved_piece) = previous_piece_data.piece.fits_at(&state.board, (dx, 0)) {
             new_piece = moved_piece;
-            Some(next_move_time) // Able to do relevant move; Insert autonomous movement.
+            // Able to do relevant move; Insert autonomous movement.
+            Some(next_move_time)
         } else {
-            None // Unable to move; Remove autonomous movement.
-        };
+            // Unable to move; Remove autonomous movement.
+            None
+        }
+    } else {
+        // No sensible movement information received.
+        None
+    };
 
     // Horizontal move could not have affected height, so it stays the same!
     let new_lowest_y = previous_piece_data.lowest_y;
@@ -497,41 +504,43 @@ fn do_fall(
     previous_piece_data: PieceData,
     fall_time: InGameTime,
 ) -> Phase {
-    // # Overview
-    //
-    // The complexity of various subparts in this function are ranked roughly:
-    //    1. Falling - due to how it is sometimes falling *and* moving *and then* updating falling/locking info.
-    //    2. Moving - due to how it is mostly a single movement + updating falling/locking info.
-    //    3. Locking - due to how simple it is if it happens.
-    //
-    // # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
-    //
-    // ## Falling
-    //
-    // The fall timer is influenced as follows¹:
-    // - immediate fall + refreshed falltimer  if  fell
-    // - refreshed falltimer  if  (grounded ~> airborne)ᵃ
-    // - [old falltimer  if  not in above cases]
-    //
-    // ## Locking
-    //
-    // The lock timer is influenced as follows²:
-    // - immediate lock  if  locked
-    // - refreshed locktimer  if  (airborne ~> grounded)ᵇ
-    // - [old locktimer  if  not in above cases]
-    //
-    // ## Moving
-    //
-    // The move timer is influenced as follows³:
-    // - immediate move + some refreshed movetimer  if  moved
-    // - no movetimer  if  move not possible
-    // - [old movetimer  if  not in above cases]
-    //
-    // ### Move Resumption
-    //
-    // We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
-    // the piece should move immediately as soon as it is unstuck⁴ (e.g. once fallen below the obstruction).
-    // However, it has to be computed after another event has been handled that may be cause of unobstruction.
+    /*
+    # Overview
+
+    The complexity of various subparts in this function are ranked roughly:
+       1. Falling - due to how it is sometimes falling *and* moving *and then* updating falling/locking info.
+       2. Moving - due to how it is mostly a single movement + updating falling/locking info.
+       3. Locking - due to how simple it is if it happens.
+
+    # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
+
+    ## Falling
+
+    The fall timer is influenced as follows¹:
+    - immediate fall + refreshed falltimer  if  fell
+    - refreshed falltimer  if  (grounded ~> airborne)ᵃ
+    - [old falltimer  if  not in above cases]
+
+    ## Locking
+
+    The lock timer is influenced as follows²:
+    - immediate lock  if  locked
+    - refreshed locktimer  if  (airborne ~> grounded)ᵇ
+    - [old locktimer  if  not in above cases]
+
+    ## Moving
+
+    The move timer is influenced as follows³:
+    - immediate move + some refreshed movetimer  if  moved
+    - no movetimer  if  move not possible
+    - [old movetimer  if  not in above cases]
+
+    ### Move Resumption
+
+    We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
+    the piece should move immediately as soon as it is unstuck⁴ (e.g. once fallen below the obstruction).
+    However, it has to be computed after another event has been handled that may be cause of unobstruction.
+    */
 
     // Drop piece and update all appropriate piece-related values.
     let mut new_piece = previous_piece_data.piece;
@@ -540,21 +549,36 @@ fn do_fall(
     }
 
     // Move resumption.
-    let new_auto_move_scheduled = if let Some((moved_piece, new_move_scheduled)) =
-        check_piece_became_movable_get_moved_piece_and_move_scheduled(
+    let ensure_lt_lock_delay = (config.ensure_move_delay_lt_lock_delay
+        && !previous_piece_data.is_fall_not_lock)
+        .then_some(state.lock_delay);
+
+    let opt_dx_and_next_move_time = calc_move_direction_and_next_move_time(
+        config,
+        &state.buttons_pressed,
+        fall_time,
+        ensure_lt_lock_delay,
+    );
+
+    let new_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time {
+        if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
             new_piece,
             &state.board,
-            calc_move_dx_and_next_move_time(config, &state.buttons_pressed, fall_time),
+            dx,
         ) {
-        // Naïvely, movement direction should be kept;
-        // But due to the system mentioned in (⁴), we do need to check
-        // if the piece was stuck and became unstuck, and manually do a move in this case!
-        new_piece = moved_piece;
-        new_move_scheduled
+            // Naïvely, movement direction should be kept;
+            // But due to the system mentioned in (⁴), we do need to check
+            // if the piece was stuck and became unstuck, and manually do a move in this case!
+            new_piece = moved_piece;
+            Some(next_move_time)
+        } else {
+            // No changes need to be made.
+            previous_piece_data.auto_move_scheduled
+        }
     } else {
-        // No changes need to be made.
-        previous_piece_data.auto_move_scheduled
+        // No sensible movement information received.
+        None
     };
 
     let (new_lowest_y, new_capped_lock_time) =
@@ -608,118 +632,160 @@ fn do_fall(
     }
 }
 
-fn do_player_button_update(
+fn do_player_input(
     config: &Configuration,
     state: &mut State,
     previous_piece_data: PieceData,
-    button_change: ButtonChange,
+    input: Input,
     new_state_buttons_pressed: [Option<InGameTime>; Button::VARIANTS.len()],
-    button_update_time: InGameTime,
+    input_time: InGameTime,
     feedback_msgs: &mut Vec<FeedbackMsg>,
 ) -> Phase {
-    // # Overview
-    //
-    // The complexity of various subparts in this function are ranked roughly:
-    //    1. Figuring out movement and future movement (scheduling / preparing autonomous piece updates).
-    //    2. Figuring out falling and locking (scheduling / preparing autonomous piece updates).
-    //    3. All other immediate button changes (easy).
-    //
-    // # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
-    //
-    // ## Falling
-    //
-    // The fall timer is influenced as follows ¹:
-    // - refreshed falltimer  if  (grounded ~> airborne)ᵃ
-    // - refreshed falltimer  if  (_ ~> airborne) + soft drop just pressed
-    // - refreshed falltimer  if  (_ ~> airborne) + soft drop just released
-    // - [old falltimer  if  (airborne ~> airborne) = not in above cases, c.f. (ᵃ)]
-    //
-    // ## Locking
-    //
-    // The lock timer is influenced as follows ²:
-    // - zero locktimer  if  (grounded ~> grounded) + soft drop just pressed
-    // - zero locktimer  if  (_ ~> grounded) + hard drop just pressed
-    // - refreshed locktimer  if  (_ ~> grounded) + (position|orientation) just changedᵇ
-    // - [old locktimer  if  (grounded ~> grounded) = not in above cases, c.f. (ᵇ)]
-    //
-    // ## Moving
-    //
-    // We analyze cases:
-    //
-    // Table 1.: Karnaugh map ⁵.
-    // +-----------+-----------------------------------------+
-    // |           |   Rel.    Rel.    Prs.    Prs.     Any
-    // | Old state |    mr      ml      ml      mr     Other
-    // +           +-----------------------------------------+
-    // |   ¬ml ¬mr |  | - |?  | - |?   ←₊  ⁱ     →₊ⁱ   | - |
-    // |   ¬ml  mr |     →₋ᵏ    |→|?   ←₊→₋ⁱ    |→|?     |→|
-    // |    ml< mr |   ←₊→₋ⁱ    |→|   |←|?    |←|?       |→|
-    // |    ml> mr |  |←|      ←₋→₊ⁱ  |←|?    |←|?     |←|    // FIXME:  ml&&mr + Prs.ml might still want to initiate a move?..
-    // |    ml ¬mr |  |←|?     ←₋ᵏ    |←|?     ←₋→₊ⁱ   |←|
-    // +-----------+-----------------------------------------+
-    // |  '-' = not moving      'X₋  ' = stop X
-    // |  '←' = moving left     '  X₊' = start X
-    // |  '→' = moving right    '|X| ' = keep X
-    // |  ⁱ: immediate move + refresh autonomous moves
-    // |  ᵏ: cease autonomous moves
-    // +-----------------------------------------------------+
-    //
-    // ### Moving
-    //
-    // The (ⁱ)/(ᵏ)-entries of Table 1 are the major effects of move inputs to be implemented ³:
-    // - immediate move + refreshed movetimer  if  (ⁱ)
-    // - removed movetimer  if  (ᵏ)
-    //
-    // Otherwise we should implement:
-    // - old movetimer  if  no change like in (ⁱ)/(ᵏ)
-    //
-    // ### Move Resumption
-    //
-    // We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
-    // the piece should move immediately as soon as it is unstuck (e.g. once fallen below the obstruction) ⁴.
-    // This system takes effect in the non-(ⁱ)/(ᵏ)-entries of Table 1.
-    // However, it has to be computed after another event has been handled that may be cause of unobstruction.
+    /*
+    # Overview
 
-    // Pre-compute new direction of movement and projected next movement time.
-    let (dx, next_move_time) =
-        calc_move_dx_and_next_move_time(config, &new_state_buttons_pressed, button_update_time);
+    The complexity of various subparts in this function are ranked roughly:
+       1. Figuring out movement and future movement (scheduling / preparing autonomous piece updates).
+       2. Figuring out falling and locking (scheduling / preparing autonomous piece updates).
+       3. All other immediate button changes (easy).
+
+
+    # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
+
+    ## [¹] Falling
+
+    The fall timer is influenced as follows:
+    - refreshed falltimer  if  (grounded ~> airborne)
+    - refreshed falltimer  if  ( _______ ~> airborne) + soft drop just pressed
+    - refreshed falltimer  if  ( _______ ~> airborne) + soft drop just released
+    - [previous falltimer  if  (airborne ~> airborne) + not in above cases]
+
+    ## [²] Locking
+
+    The lock timer is influenced as follows:
+    -      zero locktimer  if  (grounded ~> grounded) + soft drop just pressed
+    -      zero locktimer  if  ( _______ ~> grounded) + hard drop just pressed
+    - refreshed locktimer  if  ( _______ ~> grounded) + (position|orientation) just changed
+    - [previous locktimer  if  (grounded ~> grounded) + not in above cases]
+
+    ## [³] Moving
+
+    We do a complete case analysis. Relevant information to note is:
+    * Our *previous state* contains variables `l`, `r`, which store whether the
+      left or right movement button (respectively) is active and if so, the time
+      it was activated.
+      - Concerning our state, we also care about the different cases of
+        how `l` and `r` compare, i.e. which activation came first.
+    * Our *input* consists of a left/right release/press button change at a given
+      in-game time. The in-game time is only relevant to update the button state.
+    * Our *next state* consists of the respective `l`/`r` updated.
+      Interesting cases here consist of activations when button was already activated
+      previously without a deactivation input.
+    * Our *other effects* consist of the immediate movement we might want to accomplish.
+
+    Goals:
+    * We want to understand when auto-move time needs to be set anew.
+      This can be seen in Table (⁵) in entries marked (ˢ) and coincides with
+      a direct move performed.
+    * We want to understand when auto-move time needs to be canceled.
+      This can be seen in Table (⁵) in entries marked (ᶜ) and coincides with
+      on last move button deactivated.
+    * We want to understand when auto-move time needs to be kept as-is.
+      This can be seen in Table (⁵) in entries not marked with (ˢ) or (ᶜ).
+      Of note are entries where movement is happening still.
+
+    Table (⁵) details all interactions we desire in every single case.
+    Example readings:
+    * `l  r` `Actv.L`: Left and right are inactive and we active left.
+      We end up in `L  r` `←+ ·ˢ` where only left is active and we need to initiate
+      movement to the left.
+    * `L <R` `Deact.l`: Left and right are both active -- right activated after left,
+      so we are moving right -- and we deactivate left.
+      We end up in `l  R` `·  →` where only right is active and we just keep moving
+      to the right.
+
+    [⁵] Table: "Karnaugh map".
+    +-----------+----------------------------------------------+
+    |           |     Deact_l   Deact_r   Actv_R    Actv_L     |
+    + Old state +----------------------------------------------+
+    |           |                                              |
+    |   l  r    |      l  r      l  r      l  R      L  r      |
+    |   ·  ·    |      ·  ·      ·  ·      · +→ˢ     ←+ ·ˢ     |
+    |           |                                              |
+    |   L  r    |      l  r      L  r      L  R      L  r      |
+    |   ←  ·    |      ←- ·ᶜ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
+    |           |                                              |
+    |   L> R    |      l  R      L  r      L  R      L  R      |
+    |   ←  ·    |      ←-+→ˢ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
+    |           |                                              |
+    |   L==R    |      l  R      L  r      L  R      L  R      |
+    |   ·  ·    |      · +→ˢ     ←+ ·ˢ     · +→ˢ     ←+ ·ˢ     |
+    |           |                                              |
+    |   L <R    |      l  R      L  r      L  R      L  R      |
+    |   ·  →    |      ·  →      ←+-→ˢ     · +→ˢ     ←+-→ˢ     |
+    |           |                                              |
+    |   l  R    |      l  R      l  r      l  R      L  R      |
+    |   ·  →    |      ·  →      · -→ᶜ     · +→ˢ     ←+-→ˢ     |
+    |           |                                              |
+    +-----------+----------------------------------------------+
+
+    The table has nontrivial complexity but from it we can derive expressions to
+    for the things we actually care about (convention: `lrLR` refer to old state):
+    * (ˢ) *Setting auto-move time*:
+          Actv_R  ||  Actv_L  ||  L==R  ||  L>R !Deact_R  ||  L<R !Deact_L
+      Or:
+          !(Deact_L !L>=R || Deact_R !L=<R)
+    * (ᶜ) *Canceling auto-move time*:
+          L r Deact_l  ||  r L Deact_L
+    * *Performing immediate move*; Same as (ˢ)!
+
+    ### Move Resumption [⁴]
+
+    We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
+    the piece should move immediately as soon as it is unstuck (e.g. once fallen below the obstruction).
+    * This system takes effect in the non-(ˢ)-(ᶜ)-entries of Table (⁵).
+    * However, it has to be computed after another event has been handled that may be cause of unobstruction.
+
+    */
 
     // Prepare to maybe change the move_scheduled.
-    let mut maybe_override_auto_move: Option<Option<InGameTime>> = None;
+    let mut computed_move_input_data: Option<(bool, bool)> = None;
 
     let mut new_piece = previous_piece_data.piece;
-    use {Button as B, ButtonChange as BC};
-    match button_change {
+    use {Button as B, Input as I};
+    match input {
         // Hold.
         // - If succeeds, changes game action state to spawn different piece.
         // - Otherwise does nothing.
-        BC::Press(B::HoldPiece) => {
-            if let Some(new_phase) = try_hold(state, new_piece.tetromino, button_update_time) {
+        I::Activate(B::HoldPiece) => {
+            if let Some(new_phase) = try_hold(state, new_piece.tetromino, input_time) {
                 return new_phase;
             }
         }
 
         // Teleports.
         // Just instantly try to move piece all the way into applicable direction.
-        BC::Press(dir @ (B::TeleDown | B::TeleLeft | B::TeleRight)) => {
-            let offset = match dir {
+        I::Activate(teleport @ (B::TeleDown | B::TeleLeft | B::TeleRight)) => {
+            let offset = match teleport {
                 B::TeleDown => (0, -1),
                 B::TeleLeft => (-1, 0),
                 B::TeleRight => (1, 0),
                 _ => unreachable!(),
             };
+
             new_piece = new_piece.teleported(&state.board, offset);
         }
 
         // Rotates.
         // Just instantly try to rotate piece into applicable direction.
-        BC::Press(dir @ (B::RotateLeft | B::RotateRight | B::RotateAround)) => {
-            let right_turns = match dir {
+        I::Activate(rotate @ (B::RotateLeft | B::RotateRight | B::RotateAround)) => {
+            let right_turns = match rotate {
                 B::RotateLeft => -1,
                 B::RotateRight => 1,
                 B::RotateAround => 2,
                 _ => unreachable!(),
             };
+
             if let Some(rotated_piece) =
                 config
                     .rotation_system
@@ -732,12 +798,12 @@ fn do_player_button_update(
         // Hard Drop.
         // Instantly try to move piece all the way down.
         // The locking is handled as part of a different check/system further.
-        BC::Press(B::DropHard) => {
+        I::Activate(B::DropHard) => {
             new_piece = new_piece.teleported(&state.board, (0, -1));
 
             if config.feedback_verbosity != FeedbackVerbosity::Silent {
                 feedback_msgs.push((
-                    button_update_time,
+                    input_time,
                     Feedback::HardDrop {
                         old_piece: previous_piece_data.piece,
                         new_piece,
@@ -749,57 +815,39 @@ fn do_player_button_update(
         // Soft Drop.
         // Instantly try to move piece one tile down.
         // The locking is handled as part of a different check/system further.
-        BC::Press(B::DropSoft) => {
+        I::Activate(B::DropSoft) => {
             if let Some(fallen_piece) = new_piece.fits_at(&state.board, (0, -1)) {
                 new_piece = fallen_piece;
             }
         }
 
-        // Moves and move releases.
-        // These are very complicated and stateful.
-        // The logic implemented here is based on (³) and the Karnaugh map in (⁵)
-        BC::Press(dir @ (B::MoveLeft | B::MoveRight))
-        | BC::Release(dir @ (B::MoveLeft | B::MoveRight)) => {
-            let old_ml = state.buttons_pressed[B::MoveLeft].is_some();
-            let old_mr = state.buttons_pressed[B::MoveRight].is_some();
-            let is_prs = matches!(button_change, BC::Press(_));
-            let is_ml = matches!(dir, B::MoveLeft);
+        // Movement.
+        // This is relatively very complicated; The logic is based on the comment in (³).
+        I::Activate(B::MoveLeft | B::MoveRight) | I::Deactivate(B::MoveLeft | B::MoveRight) => {
+            let prev_l = state.buttons_pressed[B::MoveLeft];
+            let prev_r = state.buttons_pressed[B::MoveRight];
+            let (l, r) = (prev_l.is_some(), prev_r.is_some());
 
-            let prs_ml = !old_ml && is_prs && is_ml; // ←₊ⁱ; ←₊→₋ⁱ
-            let prs_mr = !old_mr && is_prs && !is_ml; // →₊ⁱ; ←₋→₊ⁱ
-
-            let rel_one = old_ml && old_mr && !is_prs;
-            let rel_just_ml = rel_one
-                && is_ml
-                && state.buttons_pressed[B::MoveLeft] > state.buttons_pressed[B::MoveRight]; // ←₋→₊ⁱ
-            let rel_just_mr = rel_one
-                && !is_ml
-                && state.buttons_pressed[B::MoveLeft] < state.buttons_pressed[B::MoveRight]; // ←₊→₋ⁱ
-
-            let initiate_m = prs_ml || prs_mr || rel_just_ml || rel_just_mr;
-
-            let rel_remaining_ml = old_ml && !old_mr && !is_prs && is_ml; // ←₋ᵏ
-            let rel_remaining_mr = !old_ml && old_mr && !is_prs && !is_ml; // →₋ᵏ
-
-            let cancel_m = rel_remaining_ml || rel_remaining_mr;
-
-            maybe_override_auto_move = if initiate_m {
-                if let Some(moved_piece) = new_piece.fits_at(&state.board, (dx, 0)) {
-                    new_piece = moved_piece;
-                    Some(Some(next_move_time)) // Able to do relevant move; Insert autonomous movement.
-                } else {
-                    Some(None) // Unable to move; Remove autonomous movement.
-                }
-            } else if cancel_m {
-                Some(None) // Buttons unpressed: Remove autonomous movement.
-            } else {
-                None // No relevant button state changes: Do not change autonomous movement.
+            // *Setting auto-move time* (alt): !(Deact_L !L>=R || Deact_R !L=<R)
+            let sentinel_setmvmt = {
+                let a = matches!(input, I::Deactivate(B::MoveLeft)) && !(r && prev_l >= prev_r);
+                let b = matches!(input, I::Deactivate(B::MoveRight)) && !(l && prev_l <= prev_r);
+                !(a || b)
             };
+
+            // *Canceling auto-move time*: L r Deact_l  ||  r L Deact_L
+            let sentinel_cancelmvmt = {
+                let a = l && !r && matches!(input, I::Deactivate(B::MoveLeft));
+                let b = !l && r && matches!(input, I::Deactivate(B::MoveRight));
+                a || b
+            };
+
+            computed_move_input_data = Some((sentinel_setmvmt, sentinel_cancelmvmt));
         }
 
         // Various button releases.
         // These don't have any direct effect (move, rotate) on the `piece` in themselves.
-        BC::Release(
+        I::Deactivate(
             B::RotateLeft
             | B::RotateRight
             | B::RotateAround
@@ -815,26 +863,55 @@ fn do_player_button_update(
     // Epilogue. Finalize state updates.
 
     // Update movetimer and rest of movement stuff.
-    // See also (³) and (⁴).
-    let new_auto_move_scheduled = if let Some(move_scheduled) = maybe_override_auto_move {
-        // If we were in a case where movement was explicitly changed, do so.
-        // This implements (³).
-        move_scheduled
-    } else if let Some((moved_piece, new_auto_move_scheduled)) =
-        check_piece_became_movable_get_moved_piece_and_move_scheduled(
+    // See also (³).
+
+    let new_auto_move_scheduled = 'exp: {
+        let ensure_lt_lock_delay = (config.ensure_move_delay_lt_lock_delay
+            && !previous_piece_data.is_fall_not_lock)
+            .then_some(state.lock_delay);
+        let Some((dx, next_move_time)) = calc_move_direction_and_next_move_time(
+            config,
+            &new_state_buttons_pressed,
+            input_time,
+            ensure_lt_lock_delay,
+        ) else {
+            // No sensible movement information received.
+            break 'exp None;
+        };
+
+        // Handle case where movement input was activated.
+        if let Some((initiate_mvmt, cancel_mvmt)) = computed_move_input_data {
+            break 'exp if initiate_mvmt {
+                if let Some(moved_piece) = new_piece.fits_at(&state.board, (dx, 0)) {
+                    new_piece = moved_piece;
+                    // Able to do relevant move; Set autonomous movement.
+                    Some(next_move_time)
+                } else {
+                    // Unable to move; Unschedule autonomous movement.
+                    None
+                }
+            } else if cancel_mvmt {
+                // Buttons deactivated; Cancel autonomous movement.
+                None // Buttons unpressed: Remove autonomous movement.
+            } else {
+                // No relevant movement changes caused by mvmt-related button input: Don't do anything.
+                previous_piece_data.auto_move_scheduled
+            };
+        }
+
+        // Due to the system mentioned in (⁴), we do need to check
+        // if the piece was stuck and became unstuck, and manually do a move in this case!
+        if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
             new_piece,
             &state.board,
-            (dx, next_move_time),
-        )
-    {
-        // Naïvely, movement direction should be kept;
-        // But due to the system mentioned in (⁴), we do need to check
-        // if the piece was stuck and became unstuck, and manually do a move in this case!
-        // (Also note: We use `(dx, next_move_time)` as computed from the *new* button state - but should not change, since this route is only triggered if the piece is able to move again and NOT because of a player move (`maybe_override_auto_move` is `None`).)
-        new_piece = moved_piece;
-        new_auto_move_scheduled
-    } else {
+            dx,
+        ) {
+            // (Also note: We use `(dx, next_move_time)` as computed from the *new* button state - but should not change, since this route is only triggered if the piece is able to move again and NOT because of a player move (`maybe_override_auto_move` is `None`).)
+            new_piece = moved_piece;
+            break 'exp Some(next_move_time);
+        }
+
         // All checks passed, no changes need to be made.
         // This is the case where neither (³) or (⁴) apply.
         previous_piece_data.auto_move_scheduled
@@ -846,7 +923,7 @@ fn do_player_button_update(
             // Refresh position and capped_lock_time.
             (
                 new_piece.position.1,
-                button_update_time.saturating_add(
+                input_time.saturating_add(
                     state
                         .lock_delay
                         .mul_ennf64(config.lock_reset_cap_factor)
@@ -874,14 +951,11 @@ fn do_player_button_update(
     let new_fall_or_lock_time = if new_is_fall_not_lock {
         // Calculate scheduled fall time.
         // This implements (¹).
-        let fall_reset = was_grounded
-            || matches!(
-                button_change,
-                BC::Press(B::DropSoft) | BC::Release(B::DropSoft)
-            );
+        let fall_reset =
+            was_grounded || matches!(input, I::Activate(B::DropSoft) | I::Deactivate(B::DropSoft));
         if fall_reset {
             // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.
-            button_update_time.saturating_add(
+            input_time.saturating_add(
                 if new_state_buttons_pressed[Button::DropSoft].is_some() {
                     state.fall_delay.div_ennf64(config.soft_drop_divisor)
                 } else {
@@ -896,13 +970,13 @@ fn do_player_button_update(
     } else {
         // Calculate scheduled lock time.
         // This implements (²).
-        let lock_immediately = matches!(button_change, BC::Press(B::DropHard))
-            || (was_grounded && matches!(button_change, BC::Press(B::DropSoft)));
+        let lock_immediately = matches!(input, I::Activate(B::DropHard))
+            || (was_grounded && matches!(input, I::Activate(B::DropSoft)));
         let lock_reset_piecechange = new_piece != previous_piece_data.piece;
         let lock_reset_lenience = config.lenient_lock_delay_reset
             && matches!(
-                button_change,
-                BC::Press(
+                input,
+                I::Activate(
                     B::MoveLeft
                         | B::MoveRight
                         | B::RotateLeft
@@ -916,13 +990,13 @@ fn do_player_button_update(
 
         if lock_immediately {
             // We are on the ground - if hard drop pressed or soft drop when ground is touched, lock immediately.
-            button_update_time
+            input_time
         } else if lock_reset_lenience || lock_reset_piecechange {
             // On the ground - Refresh lock time if piece moved.
             // NOTE: capped_lock_time may actually lie in the past, so we first need to cap *it* from below (current time)!
-            button_update_time
+            input_time
                 .max(new_capped_lock_time)
-                .min(button_update_time.saturating_add(state.lock_delay.saturating_duration()))
+                .min(input_time.saturating_add(state.lock_delay.saturating_duration()))
         } else {
             // Previous lock time.
             previous_piece_data.fall_or_lock_time
@@ -1088,44 +1162,51 @@ fn do_lock(
     }
 }
 
-// FIXME: Currently, this function returns ostensibly harmless sentinels in the case
-// that we can't logically decide which direction to move. This should be handled
-// more gracefully / with types alone / in a way that can't accidentally go wrong.
-fn calc_move_dx_and_next_move_time(
+/// This function may return an integer = `-1` | `1` and a time at or after `move_time` for the next designated auto-move.
+/// It returns `None` when it cannot determine a direction to move to, which happens when:
+/// * Both directions were pressed at the exact same in-game time, or
+/// * No direction is pressed.
+fn calc_move_direction_and_next_move_time(
     config: &Configuration,
     button_state: &[Option<InGameTime>; Button::VARIANTS.len()],
     move_time: InGameTime,
-) -> (isize, InGameTime) {
+    ensure_lt_lock_delay: Option<ExtDuration>,
+) -> Option<(isize, InGameTime)> {
     let (dx, how_long_relevant_direction_pressed) = match (
         button_state[Button::MoveLeft],
         button_state[Button::MoveRight],
     ) {
-        (Some(time_prsd_left), Some(time_prsd_right)) => match time_prsd_left.cmp(&time_prsd_right)
-        {
-            // 'Right' was pressed more recently, go right.
-            std::cmp::Ordering::Less => (1, move_time.saturating_sub(time_prsd_right)),
-            // Both pressed at exact same time, don't move.
-            std::cmp::Ordering::Equal => return (0, Duration::MAX),
-            // 'Left' was pressed more recently, go left.
-            std::cmp::Ordering::Greater => (-1, move_time.saturating_sub(time_prsd_left)),
-        },
+        (Some(time_actvd_left), Some(time_actvd_right)) => {
+            match time_actvd_left.cmp(&time_actvd_right) {
+                // 'Right' was pressed more recently, go right.
+                std::cmp::Ordering::Less => (1, move_time.saturating_sub(time_actvd_right)),
+                // Both pressed at exact same time, don't move.
+                std::cmp::Ordering::Equal => return None,
+                // 'Left' was pressed more recently, go left.
+                std::cmp::Ordering::Greater => (-1, move_time.saturating_sub(time_actvd_left)),
+            }
+        }
         // Only 'left' pressed.
         (Some(time_prsd_left), None) => (-1, move_time.saturating_sub(time_prsd_left)),
         // Only 'right' pressed.
         (None, Some(time_prsd_right)) => (1, move_time.saturating_sub(time_prsd_right)),
         // None pressed. No movement.
-        (None, None) => return (0, Duration::MAX),
+        (None, None) => return None,
     };
 
-    let next_move_scheduled = move_time.saturating_add(
-        if how_long_relevant_direction_pressed >= config.delayed_auto_shift {
-            config.auto_repeat_rate
-        } else {
-            config.delayed_auto_shift
-        },
-    );
+    let mut move_delay = if how_long_relevant_direction_pressed >= config.delayed_auto_shift {
+        config.auto_repeat_rate
+    } else {
+        config.delayed_auto_shift
+    };
 
-    (dx, next_move_scheduled)
+    if let Some(ExtDuration::Finite(lock_delay)) = ensure_lt_lock_delay {
+        // Ensure moves occur faster than locks.
+        // FIXME: Is there a more elegant approach than trying to subtract the smallest possible nonzero `Duration`?
+        move_delay = move_delay.min(lock_delay.saturating_sub(Duration::from_nanos(1)));
+    }
+
+    Some((dx, move_time.saturating_add(move_delay)))
 }
 
 // Compute the fall and lock delay corresponding to the current lineclear progress.

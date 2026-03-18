@@ -58,14 +58,14 @@ let mut game = Game::builder()
 
 // Updating the game with the info that 'left' should be pressed at second 5.0;
 // If a piece is in the game, it will try to move left.
-let button_change = ButtonChange::Press(Button::MoveLeft);
-game.update(GameTime::from_secs(5.0), Some(button_change));
+let input = Input::Activate(Button::MoveLeft);
+game.update(InGameTime::from_secs(5.0), Some(input));
 
 // ...
 
 // Updating the game with the info that no input change has occurred up to second 7.0;
 // This updates the game, e.g., pieces fall.
-game.update(GameTime::from_secs(7.0), None);
+game.update(InGameTime::from_secs(7.0), None);
 
 // Read most recent game state;
 // This is how a UI can know how to render the board, etc.

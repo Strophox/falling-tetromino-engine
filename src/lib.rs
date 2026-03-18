@@ -838,14 +838,14 @@ impl DelayParameters {
 
     /// Delay equation which implements guideline-like lock delays:
     /// * 0 lineclears ~> 500ms lock delay.
-    /// * Decrease lock_delay by 20 ms every 10 lineclears (= 2 ms every lineclear).
-    /// * End at 200ms lock delay.
+    /// * Decrease lock_delay by 10 ms every 10 lineclears (= 1 ms every lineclear).
+    /// * End at 100ms lock delay.
     pub fn standard_lock() -> Self {
         Self {
             base_delay: Duration::from_millis(500).into(),
             factor: 1.into(),
-            subtrahend: Duration::from_millis(2).into(),
-            lowerbound: Duration::from_millis(200).into(),
+            subtrahend: Duration::from_millis(1).into(),
+            lowerbound: Duration::from_millis(100).into(),
         }
     }
 

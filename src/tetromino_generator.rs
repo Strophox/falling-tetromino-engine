@@ -152,7 +152,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
             } => {
                 let weights = pieces_left.iter();
 
-                // SAFETY: Struct invariant.
+                // TODO: Fix this! We can't make enum struct-variant fields private.
                 let idx = WeightedIndex::new(weights).unwrap().sample(&mut self.rng);
 
                 // Update individual tetromino number and maybe replenish bag (ensuring invariant).
@@ -173,12 +173,14 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 let weights = relative_counts.iter().map(weigh_fn);
 
                 // FIXME: SAFETY; `weights` will always be non-zero due to `weigh_fn`, but could they still `OverflowError` etc.?
+                // TODO: Fix this! We can't make enum struct-variant fields private.
                 let idx = WeightedIndex::new(weights).unwrap().sample(&mut self.rng);
 
                 // Update individual tetromino counter and maybe rebalance all relative counts
                 relative_counts[idx] += 1;
 
                 // SAFETY: `self.relative_counts` always has a minimum.
+                // TODO: Fix this! We can't make enum struct-variant fields private.
                 let min = *relative_counts.iter().min().unwrap();
                 if min > 0 {
                     for x in relative_counts.iter_mut() {
@@ -198,6 +200,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 let weights = last_generated.iter().map(weighing);
 
                 // FIXME: SAFETY; `weights` will always be non-zero due to `weigh_fn`, but could they still `OverflowError` etc.?: `falling_tetromino_engine::TetrominoGenerator::recency_with(ExtNonNegF64::MAX)`
+                // TODO: Fix this! We can't make enum struct-variant fields private.
                 let idx = WeightedIndex::new(weights).unwrap().sample(&mut self.rng);
 
                 // Update all tetromino last_played values.

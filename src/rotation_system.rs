@@ -8,7 +8,11 @@ use crate::{Board, Orientation, Piece, Tetromino};
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RotationSystem {
-    /// The self-developed 'Ocular' rotation system.
+    /// The raw rotation system resulting from simply reorienting the internal piece representation.
+    /// This can be seen as a debug implementation.
+    /// The rotation itself looks similar to [`RotationSystem::ClassicL`].
+    Raw,
+    /// The 'Ocular' rotation system.
     #[default]
     Ocular,
     /// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
@@ -22,16 +26,24 @@ pub enum RotationSystem {
 impl RotationSystem {
     /// Tries to rotate a piece with the chosen `RotationSystem`.
     ///
-    /// This will return `None` if the rotation is not possible, and `Some(p)` if the rotation
-    /// succeeded with `p` as the new state of the piece.
+    /// This will return `Ok(new_piece)` if the `old_piece`, when rotated
+    /// `right_turns`-times from its position, fit onto the board, ending up as `new_piece`;
+    /// It will return None if not.
+    ///
+    /// In particular, rotating a piece `0` times tests whether piece fits in its *current* position.
     pub fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         match self {
+            RotationSystem::Raw => raw_rotate(piece, board, right_turns),
             RotationSystem::Ocular => ocular_rotate(piece, board, right_turns),
-            RotationSystem::ClassicL => classicl_rotate(piece, board, right_turns),
-            RotationSystem::ClassicR => classicr_rotate(piece, board, right_turns),
+            RotationSystem::ClassicL => classic_rotate(piece, board, right_turns, false),
+            RotationSystem::ClassicR => classic_rotate(piece, board, right_turns, true),
             RotationSystem::Super => super_rotate(piece, board, right_turns),
         }
     }
+}
+
+fn raw_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    piece.reoriented_offset_on(board, right_turns, (0, 0)).ok()
 }
 
 /*
@@ -67,8 +79,8 @@ fn ocular_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>
     use Orientation::*;
     // Figure out whether to turn 'right' (90° CW), 'left' (90° CCW), 'around' (180°) or not at all (0°).
     match right_turns.rem_euclid(4) {
-        // 0° - Don't rotate anything.
-        0 => Some(*piece),
+        // 0° - "Rotate into same orientation".
+        0 => piece.offset_on(board, (0, 0)).ok(),
 
         // 180° - Rotate 'around'.
         2 => {
@@ -130,7 +142,7 @@ fn ocular_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>
             // Mirror kicks in case we used symmetry to figure out what to do.
             let offsets = kick_table.iter().copied().map(|(x, y)| if apply_mirror { (-x, y) } else { (x, y) });
             // Using kick table, actually find whether piece fits at a given place.
-            piece.first_fit(board, offsets, right_turns)
+            piece.find_reoriented_offset_on(board, right_turns, offsets)
         }
 
         // ± 90° - Rotate 'right'/'left'.
@@ -234,87 +246,65 @@ fn ocular_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>
             // Mirror kicks in case we used symmetry to figure out what to do.
             let offsets = kick_table.iter().copied().map(|(x, y)| if let Some(mx) = apply_mirror { (mx - x, y) } else { (x, y) });
             // Using kick table, actually find whether piece fits at a given place.
-            piece.first_fit(board, offsets, right_turns)
+            piece.find_reoriented_offset_on(board, right_turns, offsets)
         },
     }
 }
 
-fn classicl_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
-    let left_rotation = match right_turns.rem_euclid(4) {
-        // No rotation occurred.
-        0 => return Some(*piece),
-        // One right rotation.
-        1 => false,
+fn classic_rotate(
+    piece: &Piece,
+    board: &Board,
+    right_turns: i8,
+    is_r_not_l: bool,
+) -> Option<Piece> {
+    let r_variant_offset = if is_r_not_l { 1 } else { 0 };
+    #[rustfmt::skip]
+    let kick = match right_turns.rem_euclid(4) {
+        // "Rotate into same orientation".
+        0 => (0, 0),
         // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
         2 => {
-            return piece.fits_at_reoriented(board, (0, 0), 2);
+            use Orientation::*;
+            match piece.tetromino {
+                Tetromino::O | Tetromino::I | Tetromino::S | Tetromino::Z => (0, 0),
+                Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
+                    N => (0, -1),
+                    S => (0, 1),
+                    E => (-1, 0),
+                    W => (1, 0),
+                },
+            }
         }
-        // One left rotation.
-        3 => true,
-        _ => unreachable!(),
+        // One right rotation.
+        r => {
+            use Orientation::*;
+            match piece.tetromino {
+                Tetromino::O => (0, 0), // ⠶
+                Tetromino::I => match piece.orientation {
+                    N | S => (1+r_variant_offset, -1), // ⠤⠤ -> ⡇
+                    E | W => (-1-r_variant_offset, 1), // ⡇  -> ⠤⠤
+                },
+                Tetromino::S | Tetromino::Z => match piece.orientation {
+                    N | S => (r_variant_offset, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
+                    E | W => (-r_variant_offset, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
+                },
+                Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
+                    N => if r == 3 { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
+                    E => if r == 3 { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
+                    S => if r == 3 { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
+                    W => if r == 3 { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
+                },
+            }
+        },
     };
-    use Orientation::*;
-    #[rustfmt::skip]
-    let kick = match piece.tetromino {
-        Tetromino::O => (0, 0), // ⠶
-        Tetromino::I => match piece.orientation {
-            N | S => (1, -1), // ⠤⠤ -> ⡇
-            E | W => (-1, 1), // ⡇  -> ⠤⠤
-        },
-        Tetromino::S | Tetromino::Z => match piece.orientation {
-            N | S => (0, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
-            E | W => (0, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
-        },
-        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
-            N => if left_rotation { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
-            E => if left_rotation { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
-            S => if left_rotation { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
-            W => if left_rotation { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
-        },
-    };
-    piece.fits_at_reoriented(board, kick, right_turns)
-}
 
-fn classicr_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
-    let left_rotation = match right_turns.rem_euclid(4) {
-        // No rotation occurred.
-        0 => return Some(*piece),
-        // One right rotation.
-        1 => false,
-        // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
-        2 => {
-            return piece.fits_at_reoriented(board, (0, 0), 2);
-        }
-        // One left rotation.
-        3 => true,
-        _ => unreachable!(),
-    };
-    use Orientation::*;
-    #[rustfmt::skip]
-    let kick = match piece.tetromino {
-        Tetromino::O => (0, 0), // ⠶
-        Tetromino::I => match piece.orientation {
-            N | S => (2, -1), // ⠤⠤ -> ⡇
-            E | W => (-2, 1), // ⡇  -> ⠤⠤
-        },
-        Tetromino::S | Tetromino::Z => match piece.orientation {
-            N | S => (1, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
-            E | W => (-1, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
-        },
-        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
-            N => if left_rotation { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
-            E => if left_rotation { (-1, 1) } else { (-1, 0) }, // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠤⠆ <- ⠧  -> ⠖⠂ // ⠦⠄ <- ⠏  -> ⠒⠆
-            S => if left_rotation { ( 1, 0) } else { ( 0, 0) }, // ⠗  <- ⠲⠂ -> ⠺  // ⠧  <- ⠖⠂ -> ⠹  // ⠏  <- ⠒⠆ -> ⠼
-            W => if left_rotation { ( 0, 0) } else { ( 0, 1) }, // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠖⠂ <- ⠹  -> ⠤⠆ // ⠒⠆ <- ⠼  -> ⠦⠄
-        },
-    };
-    piece.fits_at_reoriented(board, kick, right_turns)
+    piece.reoriented_offset_on(board, right_turns, kick).ok()
 }
 
 fn super_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
     let left = match right_turns.rem_euclid(4) {
-        // No rotation occurred.
-        0 => return Some(*piece),
+        // "Rotate into same orientation".
+        0 => return piece.offset_on(board, (0, 0)).ok(),
         // One right rotation.
         1 => false,
         // Some basic 180 rotation I came up with.
@@ -329,7 +319,7 @@ fn super_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> 
                     W => &[( 1, 0), ( 0, 0)][..],
                 },
             };
-            return piece.first_fit(board, kick_table.iter().copied(), 2);
+            return piece.find_reoriented_offset_on(board, 2, kick_table.iter().copied());
         }
         // One left rotation.
         3 => true,
@@ -360,5 +350,5 @@ fn super_rotate(piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> 
                     else { &[( 0, 1), (-1, 1), (-1, 0), ( 0, 3), (-1, 3)][..] },
         },
     };
-    piece.first_fit(board, kick_table.iter().copied(), right_turns)
+    piece.find_reoriented_offset_on(board, right_turns, kick_table.iter().copied())
 }

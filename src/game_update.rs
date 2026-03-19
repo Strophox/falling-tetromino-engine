@@ -289,8 +289,8 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     // Prepare data of spawned piece.
     let raw_pos = match spawn_tet {
-        Tetromino::O => (4, Game::SKYLINE_HEIGHT),
-        _ => (3, Game::SKYLINE_HEIGHT),
+        Tetromino::O => (4, Game::LOCK_OUT_HEIGHT as isize),
+        _ => (3, Game::LOCK_OUT_HEIGHT as isize),
     };
 
     // 'Raw' spawn piece, before remaining prespawn_actions are applied.
@@ -301,84 +301,90 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     };
 
     // "Initial Rotation" system.
+
     let mut turns = 0;
-    if config.allow_prespawn_actions {
-        if button_rr {
-            turns += 1;
-        }
-        if button_ra {
-            turns += 2;
-        }
-        if button_rl {
-            turns += 3;
-        }
+
+    if button_rr {
+        turns += 1;
+    }
+    if button_ra {
+        turns += 2;
+    }
+    if button_rl {
+        turns -= 1;
     }
 
-    // Rotation of 'raw' spawn piece.
-    let rotated_spawn_piece = if turns != 0 {
+    // Possibly; Rotation of 'raw' spawn piece.
+    let spawn_piece = if config.allow_prespawn_actions {
         config
             .rotation_system
             .rotate(&raw_spawn_piece, &state.board, turns)
     } else {
-        None
+        raw_spawn_piece
+            .fits_onto(&state.board)
+            .then_some(raw_spawn_piece)
     };
 
     // Try finding `Some` valid spawn piece from the provided options in order.
-    let spawn_piece = [
-        rotated_spawn_piece,
-        raw_spawn_piece
-            .fits(&state.board)
-            .then_some(raw_spawn_piece),
-    ]
-    .into_iter()
-    .find_map(|option| option);
-
-    // Return new piece-in-play state if piece can spawn, otherwise blockout (couldn't spawn).
-    if let Some(piece) = spawn_piece {
-        // We're falling if piece could move down.
-        let is_fall_not_lock = piece.fits_at(&state.board, (0, -1)).is_some();
-
-        let fall_or_lock_time = spawn_time.saturating_add(if is_fall_not_lock {
-            // Fall immediately.
-            Duration::ZERO
+    let Some(spawn_piece) = spawn_piece else {
+        // Otherwise BlockOut
+        let blocked_piece = if config.allow_prespawn_actions {
+            match config
+                .rotation_system
+                .rotate(&raw_spawn_piece, &Board::default(), turns)
+            {
+                Some(rotated_piece) => rotated_piece,
+                // This odd case happens when the rotation system does not even do rotation on an empty board.
+                None => raw_spawn_piece,
+            }
         } else {
-            state.lock_delay.saturating_duration()
-        });
-
-        // Piece just spawned, lowest y = initial y.
-        let lowest_y = piece.position.1;
-
-        // Piece just spawned, standard full lock time max.
-        let capped_lock_time = spawn_time.saturating_add(
-            state
-                .lock_delay
-                .mul_ennf64(config.lock_reset_cap_factor)
-                .saturating_duration(),
-        );
-
-        // Schedule immediate move after spawning, if any move button held.
-        // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
-        let auto_move_scheduled = if button_ml || button_mr {
-            Some(spawn_time)
-        } else {
-            None
+            raw_spawn_piece
         };
 
-        Phase::PieceInPlay {
-            piece_data: PieceData {
-                piece,
-                fall_or_lock_time,
-                is_fall_not_lock,
-                auto_move_scheduled,
-                lowest_y,
-                capped_lock_time,
-            },
-        }
-    } else {
-        Phase::GameEnd {
-            cause: GameEndCause::BlockOut,
+        return Phase::GameEnd {
+            cause: GameEndCause::BlockOut { blocked_piece },
             is_win: false,
-        }
+        };
+    };
+
+    // We're falling if piece could move down.
+    let is_fall_not_lock = spawn_piece.offset_on(&state.board, (0, -1)).is_ok();
+
+    let fall_or_lock_time = spawn_time.saturating_add(if is_fall_not_lock {
+        // Fall immediately.
+        Duration::ZERO
+    } else {
+        state.lock_delay.saturating_duration()
+    });
+
+    // Piece just spawned, lowest y = initial y.
+    let lowest_y = spawn_piece.position.1;
+
+    // Piece just spawned, standard full lock time max.
+    let capped_lock_time = spawn_time.saturating_add(
+        state
+            .lock_delay
+            .mul_ennf64(config.lock_reset_cap_factor)
+            .saturating_duration(),
+    );
+
+    // Schedule immediate move after spawning, if any move button held.
+    // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
+    let auto_move_scheduled = if button_ml || button_mr {
+        Some(spawn_time)
+    } else {
+        None
+    };
+
+    Phase::PieceInPlay {
+        piece_data: PieceData {
+            piece: spawn_piece,
+            fall_or_lock_time,
+            is_fall_not_lock,
+            auto_move_scheduled,
+            lowest_y,
+            capped_lock_time,
+        },
     }
 }
 
@@ -392,6 +398,7 @@ fn do_line_clearing(
         if state.board[y].iter().all(|tile| tile.is_some()) {
             // Starting from the offending line, we move down all others, then default the uppermost.
             state.board[y..].rotate_left(1);
+            // FIXME: This could underflow.
             state.board[Game::HEIGHT - 1] = Line::default();
             state.lineclears += 1;
 
@@ -426,10 +433,10 @@ fn check_piece_became_movable_get_moved_piece(
     board: &Board,
     dx: isize,
 ) -> Option<Piece> {
-    let moved_prev_piece = prev_piece.fits_at(board, (dx, 0));
-    let moved_next_piece = next_piece.fits_at(board, (dx, 0));
+    let moved_prev_piece = prev_piece.offset_on(board, (dx, 0));
+    let moved_next_piece = next_piece.offset_on(board, (dx, 0));
 
-    if let (None, Some(valid_moved_piece)) = (moved_prev_piece, moved_next_piece) {
+    if let (Err(_), Ok(valid_moved_piece)) = (moved_prev_piece, moved_next_piece) {
         Some(valid_moved_piece)
 
     // No changes need to be made after all.
@@ -461,7 +468,7 @@ fn do_autonomous_move(
     );
 
     let new_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time {
-        if let Some(moved_piece) = previous_piece_data.piece.fits_at(&state.board, (dx, 0)) {
+        if let Ok(moved_piece) = previous_piece_data.piece.offset_on(&state.board, (dx, 0)) {
             new_piece = moved_piece;
             // Able to do relevant move; Insert autonomous movement.
             Some(next_move_time)
@@ -478,15 +485,15 @@ fn do_autonomous_move(
     let new_lowest_y = previous_piece_data.lowest_y;
     let new_capped_lock_time = previous_piece_data.capped_lock_time;
 
-    let new_is_fall_not_lock = new_piece.fits_at(&state.board, (0, -1)).is_some();
+    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
 
     let new_fall_or_lock_time = if new_is_fall_not_lock {
         // Calculate scheduled fall time.
         // This implements (¹).
         let was_grounded = previous_piece_data
             .piece
-            .fits_at(&state.board, (0, -1))
-            .is_none();
+            .offset_on(&state.board, (0, -1))
+            .is_err();
 
         if was_grounded {
             // Refresh fall timer if we *started* falling.
@@ -569,7 +576,7 @@ fn do_fall(
 
     // Drop piece and update all appropriate piece-related values.
     let mut new_piece = previous_piece_data.piece;
-    if let Some(fallen_piece) = previous_piece_data.piece.fits_at(&state.board, (0, -1)) {
+    if let Ok(fallen_piece) = previous_piece_data.piece.offset_on(&state.board, (0, -1)) {
         new_piece = fallen_piece;
     }
 
@@ -625,7 +632,7 @@ fn do_fall(
             )
         };
 
-    let new_is_fall_not_lock = new_piece.fits_at(&state.board, (0, -1)).is_some();
+    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
 
     let new_fall_or_lock_time = if new_is_fall_not_lock {
         fall_time.saturating_add(
@@ -841,7 +848,7 @@ fn do_player_input(
         // Instantly try to move piece one tile down.
         // The locking is handled as part of a different check/system further.
         I::Activate(B::DropSoft) => {
-            if let Some(fallen_piece) = new_piece.fits_at(&state.board, (0, -1)) {
+            if let Ok(fallen_piece) = new_piece.offset_on(&state.board, (0, -1)) {
                 new_piece = fallen_piece;
             }
         }
@@ -907,7 +914,7 @@ fn do_player_input(
         // Handle case where movement input was activated.
         if let Some((initiate_mvmt, cancel_mvmt)) = computed_move_input_data {
             break 'exp if initiate_mvmt {
-                if let Some(moved_piece) = new_piece.fits_at(&state.board, (dx, 0)) {
+                if let Ok(moved_piece) = new_piece.offset_on(&state.board, (dx, 0)) {
                     new_piece = moved_piece;
                     // Able to do relevant move; Set autonomous movement.
                     Some(next_move_time)
@@ -964,12 +971,12 @@ fn do_player_input(
 
     // Update `is_fall_not_lock`, i.e., whether we are falling (otherwise locking) now.
     // `new_is_fall_not_lock` is needed below.
-    let new_is_fall_not_lock = new_piece.fits_at(&state.board, (0, -1)).is_some();
+    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
 
     let was_grounded = previous_piece_data
         .piece
-        .fits_at(&state.board, (0, -1))
-        .is_none();
+        .offset_on(&state.board, (0, -1))
+        .is_err();
 
     // Update falltimer and locktimer.
     // See also (¹) and (²).
@@ -1088,25 +1095,27 @@ fn do_lock(
     // - Only locked pieces clearing lines can yield bonus (i.e. can't possibly move left/right).
     // Thus, if a piece cannot move back up at lock time, it must have gotten there by rotation.
     // That's what a 'spin' is.
-    let is_spin = piece.fits_at(&state.board, (0, 1)).is_none();
+    let is_spin = piece.offset_on(&state.board, (0, 1)).is_err();
 
-    // Locking.
-    let mut entirely_above_skyline = true;
-    for ((x, y), tile_type_id) in piece.tiles() {
-        if y < Game::SKYLINE_HEIGHT {
-            entirely_above_skyline = false;
-        }
-
-        // Set tile into board.
-        state.board[y][x] = Some(tile_type_id);
-    }
+    let fits_below_skyline = piece
+        .tiles()
+        .iter()
+        .all(|&((_, y), _)| (y as usize) < Game::LOCK_OUT_HEIGHT);
 
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
-    if entirely_above_skyline {
+    if !fits_below_skyline {
         return Phase::GameEnd {
-            cause: GameEndCause::LockOut,
+            cause: GameEndCause::LockOut {
+                locked_out_piece: piece,
+            },
             is_win: false,
         };
+    }
+
+    // Locking.
+    for ((x, y), tile_type_id) in piece.tiles() {
+        // Put tile into board.
+        state.board[y as usize][x as usize] = Some(tile_type_id);
     }
 
     // Update tally of pieces_locked.

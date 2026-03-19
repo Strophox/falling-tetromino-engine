@@ -61,9 +61,9 @@ pub type Line = [Option<TileTypeID>; Game::WIDTH];
 /// The type of the entire two-dimensional playing grid.
 pub type Board = [Line; Game::HEIGHT];
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
-pub type Coord = (usize, usize);
+pub type Coord = (isize, isize);
 /// Coordinates offsets that can be [`add`]ed to [`Coord`]inates.
-pub type Offset = (isize, isize);
+pub type CoordOffset = (isize, isize);
 
 /// The type used to identify points in time in a game's internal timeline.
 pub type InGameTime = Duration;
@@ -367,12 +367,24 @@ pub struct State {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GameEndCause {
-    /// 'Lock out' denotes the most recent piece being completely locked down at
+    /// 'Lock out' denotes the most recent piece would be completely locked down at
     /// or above [`Game::SKYLINE_HEIGHT`].
-    LockOut,
-    /// 'Block out' denotes a new piece being unable to spawn due to pre-existing board tile
-    /// blocking one or several of the spawn cells.
-    BlockOut,
+    LockOut {
+        /// The offending piece that does not fit below [`Game::SKYLINE_HEIGHT`].
+        locked_out_piece: Piece,
+    },
+    /// 'Block out' denotes a new piece being unable to spawn due to existing board tile(s)
+    /// blocking one or several of the cells of a piece to be spawned.
+    BlockOut {
+        /// The offending piece that does not fit onto board.
+        blocked_piece: Piece,
+    },
+    // 'Top out' denotes a number of new lines being unable to enter the existing board.
+    /// This is currently unused in the base engine.
+    TopOut {
+        /// The offending lines that did not fit onto the existing board.
+        blocked_lines: Vec<Line>,
+    },
     /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
     /// Game ended by player forfeit.
@@ -393,7 +405,7 @@ pub struct PieceData {
     /// Whether `fall_or_lock_time` refers to a fall or lock event.
     pub is_fall_not_lock: bool,
     /// The lowest recorded vertical position of the main piece.
-    pub lowest_y: usize,
+    pub lowest_y: isize,
     /// The time after which the active piece will immediately lock upon touching ground.
     pub capped_lock_time: InGameTime,
     /// Optional time of the next move event.
@@ -684,57 +696,78 @@ impl Piece {
     }
 
     /// Checks whether the piece fits at its current location onto the board.
-    pub fn fits(&self, board: &Board) -> bool {
-        self.tiles()
-            .iter()
-            .all(|&((x, y), _)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
+    pub fn fits_onto(&self, board: &Board) -> bool {
+        self.tiles().iter().all(|&((x, y), _)| {
+            0 <= x
+                && (x as usize) < Game::WIDTH
+                && 0 <= y
+                && (y as usize) < Game::HEIGHT
+                && board[y as usize][x as usize].is_none()
+        })
     }
 
     /// Checks whether the piece fits a given offset from its current location onto the board.
-    pub fn fits_at(&self, board: &Board, offset: Offset) -> Option<Piece> {
+    pub fn offset_on(&self, board: &Board, offset: CoordOffset) -> Result<Piece, Piece> {
         let mut new_piece = *self;
-        new_piece.position = add(self.position, offset)?;
-        new_piece.fits(board).then_some(new_piece)
+        new_piece.position = add(self.position, offset);
+        if new_piece.fits_onto(board) {
+            Ok(new_piece)
+        } else {
+            Err(new_piece)
+        }
     }
 
     /// Checks whether the piece fits a given offset from its current location onto the board, with
     /// its rotation changed by some number of right turns.
-    pub fn fits_at_reoriented(
+    pub fn reoriented_offset_on(
         &self,
         board: &Board,
-        offset: Offset,
         right_turns: i8,
-    ) -> Option<Piece> {
+        offset: CoordOffset,
+    ) -> Result<Piece, Piece> {
         let mut new_piece = *self;
         new_piece.orientation = new_piece.orientation.reorient_right(right_turns);
-        new_piece.position = add(self.position, offset)?;
-        new_piece.fits(board).then_some(new_piece)
+        new_piece.position = add(self.position, offset);
+        if new_piece.fits_onto(board) {
+            Ok(new_piece)
+        } else {
+            Err(new_piece)
+        }
     }
 
     /// Given an iterator over some offsets, checks whether the rotated piece fits at any offset
     /// location onto the board.
-    pub fn first_fit(
+    pub fn find_reoriented_offset_on(
         &self,
         board: &Board,
-        offsets: impl IntoIterator<Item = Offset>,
         right_turns: i8,
+        offsets: impl IntoIterator<Item = CoordOffset>,
     ) -> Option<Piece> {
         let mut new_piece = *self;
         new_piece.orientation = new_piece.orientation.reorient_right(right_turns);
+
         let old_pos = self.position;
-        offsets.into_iter().find_map(|offset| {
-            new_piece.position = add(old_pos, offset)?;
-            new_piece.fits(board).then_some(new_piece)
-        })
+
+        for offset in offsets {
+            new_piece.position = add(old_pos, offset);
+            if new_piece.fits_onto(board) {
+                return Some(new_piece);
+            }
+        }
+
+        None
     }
 
     /// Returns the position the piece would hit if it kept moving at `offset` steps.
     /// For offset `(0,0)` this function return immediately.
-    pub fn teleported(&self, board: &Board, offset: Offset) -> Piece {
+    pub fn teleported(&self, board: &Board, offset: CoordOffset) -> Piece {
         let mut piece = *self;
         if offset != (0, 0) {
             // Move piece as far as possible.
-            while let Some(new_piece) = piece.fits_at(board, offset) {
+            while let Ok(new_piece) = piece.offset_on(board, offset) {
+                if new_piece == piece {
+                    break;
+                }
                 piece = new_piece;
             }
         }
@@ -745,8 +778,9 @@ impl Piece {
 impl std::fmt::Display for GameEndCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            GameEndCause::LockOut => "Lock out",
-            GameEndCause::BlockOut => "Block out",
+            GameEndCause::LockOut { .. } => "Lock out",
+            GameEndCause::BlockOut { .. } => "Block out",
+            GameEndCause::TopOut { .. } => "Top out",
             GameEndCause::Limit(stat) => match stat {
                 Stat::TimeElapsed(_) => "Time limit reached",
                 Stat::PiecesLocked(_) => "Piece limit reached",
@@ -875,6 +909,7 @@ impl DelayParameters {
         // Multiplicative factor computed from lineclears;
         let raw_mul = self.factor.get().powf(f64::from(lineclears));
         // Wrap it back in ExtNonNegF64.
+        // SAFETY: ∀e:int, ∀b:f64 ≤ 1, (b^e ≤ 1).
         let mul = ExtNonNegF64::new(raw_mul).unwrap();
 
         // Subtractive offset computed from lineclears.
@@ -988,12 +1023,12 @@ impl fmt::Debug for Modifier {
 
 impl Game {
     /// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
-    pub const HEIGHT: usize = Self::SKYLINE_HEIGHT + 7;
+    pub const HEIGHT: usize = Self::LOCK_OUT_HEIGHT + 7;
     /// The game field width.
     pub const WIDTH: usize = 10;
     /// The height of the (conventionally) visible playing grid that can be played in.
-    /// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameOver::LockOut`]), although it may do so partially.
-    pub const SKYLINE_HEIGHT: usize = 20;
+    /// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameEndCause::LockOut`]), although it may do so partially.
+    pub const LOCK_OUT_HEIGHT: usize = 20;
 
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
     pub fn builder() -> GameBuilder {
@@ -1106,8 +1141,8 @@ impl std::error::Error for UpdateGameError {}
 
 /// Adds an offset to a coordinate, failing if the result overflows
 /// (negative or positive).
-pub fn add((x, y): Coord, (dx, dy): Offset) -> Option<Coord> {
-    Some((x.checked_add_signed(dx)?, y.checked_add_signed(dy)?))
+pub fn add((x, y): Coord, (dx, dy): CoordOffset) -> Coord {
+    (x + dx, y + dy)
 }
 
 /*#[cfg(test)]

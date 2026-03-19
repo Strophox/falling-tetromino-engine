@@ -55,7 +55,7 @@ impl GameBuilder {
                 piece_generator: tetromino_generator,
                 piece_preview: VecDeque::new(),
                 piece_held: None,
-                board: [Line::default(); Game::HEIGHT],
+                board: Board::default(),
                 fall_delay,
                 fall_delay_lowerbound_hit_at_n_lineclears: fall_delay
                     .le(&config.fall_delay_params.lowerbound)

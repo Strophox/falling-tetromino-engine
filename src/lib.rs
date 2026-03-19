@@ -388,7 +388,10 @@ pub enum GameEndCause {
     /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
     /// Game ended by player forfeit.
-    Forfeit,
+    Forfeit {
+        /// Piece that was in play at time of forfeit.
+        piece_in_play: Option<Piece>,
+    },
     /// Custom game over.
     /// This is unused in the base engine and intended for modding.
     Custom(String),
@@ -787,7 +790,7 @@ impl std::fmt::Display for GameEndCause {
                 Stat::LinesCleared(_) => "Line limit reached",
                 Stat::PointsScored(_) => "Score limit reached",
             },
-            GameEndCause::Forfeit => "Forfeited",
+            GameEndCause::Forfeit { .. } => "Forfeited",
             GameEndCause::Custom(text) => text,
         };
         write!(f, "{s}")

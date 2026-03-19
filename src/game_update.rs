@@ -10,19 +10,26 @@ impl Game {
     /// This can be used so `game.has_ended()` returns true and prevents future
     /// calls to `update` from continuing to advance the game.
     pub fn forfeit(&mut self) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
-        if self.has_ended() {
-            // Do not allow updating a game that has already ended.
-            return Err(UpdateGameError::AlreadyEnded);
-        }
+        let piece_in_play = match self.phase {
+            Phase::Spawning { .. } | Phase::LinesClearing { .. } => None,
 
-        let is_win = false;
+            Phase::PieceInPlay { piece_data } => Some(piece_data.piece),
 
-        self.phase = Phase::GameEnd {
-            cause: GameEndCause::Forfeit,
-            is_win,
+            Phase::GameEnd { .. } => {
+                // Do not allow updating a game that has already ended.
+                return Err(UpdateGameError::AlreadyEnded);
+            }
         };
 
-        Ok(vec![(self.state.time, Feedback::GameEnded { is_win })])
+        self.phase = Phase::GameEnd {
+            cause: GameEndCause::Forfeit { piece_in_play },
+            is_win: false,
+        };
+
+        Ok(vec![(
+            self.state.time,
+            Feedback::GameEnded { is_win: false },
+        )])
     }
 
     /// The main function used to advance the game state.

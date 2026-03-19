@@ -12,7 +12,7 @@ Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-falling-tetromino-engine = "1.0.0"
+falling-tetromino-engine = "1.2.0"
 ```
 
 
@@ -25,24 +25,25 @@ The engine allows for compile-time mods which may arbitrarily access and modify 
 The engine aims to compete on the order of modern tetromino stackers;
 It incorporates many features found in such games.
 Experienced players may be familiar with most of the following mechanics:
-- Variable gravity/fall delay, possibly in-between 'frames', '20G' (fall delay = 0s),
-- Simple but flexible programming of custom fall and lock delay progressions (`DelayParameters`),
-- (Arbitrary) piece preview,
-- Pre-spawn action toggle ('Initial Hold/Rotation System'),
-- Rotation systems: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
-- Tetromino generators: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balancerelative',
-- Spawn delay (ARE),
-- Delayed auto-shift (DAS),
-- Auto-repeat rate (ARR),
-- Soft drop factor (SDF),
-- Lenient-lock-delay-reset toggle (reset lock delay even if rotation fails),
-- Lock-reset-cap factor (~maximum time before lock delay cannot be reset),
-- Line clear delay (LCD),
-- Custom win/loss conditions based on stats: time, pieces, lines, score,
-- Hold piece,
-- Higher score for higher lineclears and spins ('allspin')
-- Game reproducibility (PRNG),
-- Available player actions: MoveLeft, MoveRight; RotateLeft, RotateRight, RotateAround (180°); DropSoft, DropHard, TeleDown ('Sonic drop'), TeleLeft, TeleRight, HoldPiece.
+- **Variable gravity/fall delay** (frame-agnostic); '20G' (= 0s fall delay),
+- Simple but flexible programming of **custom fall and lock delay progressions** (`DelayParameters`),
+- (Arbitrary) **piece preview**,
+- **Pre-spawn actions** toggle ('Initial Hold/Rotation System'),
+- **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
+- **Tetromino generators**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balancerelative',
+- **Spawn delay** (ARE),
+- **Delayed auto-shift** (DAS),
+- **Auto-repeat rate** (ARR),
+- **Soft drop factor** (SDF),
+- **Lenient lock delay reset** toggle (reset lock delay even if rotate/move fails),
+- **Ensure move delay less than lock delay** toggle (DAS/ARR automatically shortened when lock delay is very low),
+- **Lock-reset-cap factor** (~maximum time before lock delay cannot be reset),
+- **Line clear duration** (LCD),
+- Custom **win/loss conditions based on stats**: time, pieces, lines, score,
+- **Hold** piece,
+- Higher **score** for larger lineclears and spins ('allspin')
+- Game **reproducibility** (PRNG),
+- Available player actions: MoveLeft, MoveRight; RotateLeft, RotateRight, Rotate180; DropSoft, DropHard, TeleDown ('Sonic drop'), TeleLeft, TeleRight, HoldPiece.
 
 
 # Example Usage
@@ -50,26 +51,35 @@ Experienced players may be familiar with most of the following mechanics:
 ```rust
 use falling_tetromino_engine::*;
 
-// Starting up a game - note that in-game time starts at 0.0s.
+// Starting up a game - note that in-game time starts at 0s.
 let mut game = Game::builder()
-    .seed(42)
+    .seed(1234)
     /* ...Further optional configuration possible... */
     .build();
 
-// Updating the game with the info that 'left' should be pressed at second 5.0;
+// Updating the game with the info that 'left' should be pressed at second 4.2;
 // If a piece is in the game, it will try to move left.
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs(5.0), Some(input));
+game.update(InGameTime::from_secs(4.2), Some(input));
 
 // ...
 
-// Updating the game with the info that no input change has occurred up to second 7.0;
-// This updates the game, e.g., pieces fall.
-game.update(InGameTime::from_secs(7.0), None);
+// Updating the game with the info that no input change has occurred up to second 6.79;
+// This updates the game, e.g., pieces fall and lock.
+game.update(InGameTime::from_secs(6.79), None);
 
 // Read most recent game state;
 // This is how a UI can know how to render the board, etc.
 let State { board, .. } = game.state();
+```
+
+Internally, the game keeps its own timeline:
+```
+    0s - Game start; Piece is spawned.
+   /        4.2s - Player input; Piece starts moving left.
+  /        /            6.79s - Piece will have moved left some more,
+ /        /            /        has been affected by gravity etc.
+[--------|------------¦--------------- - - - ->
 ```
 
 
@@ -101,6 +111,7 @@ struct Configuration {
     fall_delay_params: DelayParameters,
     soft_drop_divisor: ExtNonNegF64,
     lock_delay_params: DelayParameters,
+    ensure_move_delay_lt_lock_delay: bool,
     lenient_lock_delay_reset: bool,
     lock_reset_cap_factor: ExtNonNegF64,
     line_clear_duration: Duration,
@@ -135,7 +146,7 @@ enum Phase {
     Spawning { spawn_time: InGameTime },
     PieceInPlay { piece_data: PieceData },
     LinesClearing { line_clears_finish_time: InGameTime },
-    GameEnd { result: GameResult },
+    GameEnd { cause: GameEndCause, is_win: bool },
 }
 
 struct Modifier {
@@ -148,10 +159,10 @@ struct Modifier {
 // Small SELECTION of smaller types:
 
 enum Button {
-    MoveLeft,   MoveRight,
-    RotateLeft, RotateRight, RotateAround,
+    MoveLeft, MoveRight,
+    RotateLeft, RotateRight, Rotate180,
     DropSoft, DropHard,
-    TeleLeft,   TeleRight, TeleDown, 
+    TeleLeft, TeleRight, TeleDown, 
     HoldPiece,
 }
 
@@ -183,4 +194,4 @@ type GameModFn = dyn FnMut(
 );
 ```
 
-These are almost all types, although for further information see documentation.
+See [full documentation](https://docs.rs/falling-tetromino-engine).

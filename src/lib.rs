@@ -9,29 +9,29 @@ mechanics.
 ```
 use falling_tetromino_engine::*;
 
-// Starting up a game - note that in-game time starts at 0.0s.
+// Starting up a game - note that in-game time starts at 0s.
 let mut game = Game::builder()
-    .seed(42)
+    .seed(1234)
     /* ...Further optional configuration possible... */
     .build();
 
-// Updating the game with the info that 'left' should be pressed at second 5.0;
+// Updating the game with the info that 'left' should be pressed at second 4.2;
 // If a piece is in the game, it will try to move left.
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs(5.0), Some(input));
+game.update(InGameTime::from_secs(4.2), Some(input));
 
 // ...
 
-// Updating the game with the info that no input change has occurred up to second 7.0;
-// This updates the game, e.g., pieces fall.
-game.update(InGameTime::from_secs(7.0), None);
+// Updating the game with the info that no input change has occurred up to second 6.79;
+// This updates the game, e.g., pieces fall and lock.
+game.update(InGameTime::from_secs(13.37), None);
 
 // Read most recent game state;
 // This is how a UI can know how to render the board, etc.
 let State { board, .. } = game.state();
 ```
 
-FIXME: Document *all* features in detail (including IRS, etc., cargo feature `serde` etc.).
+[FIXME: Document *all* features in detail (including IRS, etc., cargo feature `serde` etc.).]
 */
 
 #![warn(missing_docs)]
@@ -247,13 +247,13 @@ pub struct Configuration {
     pub soft_drop_divisor: ExtNonNegF64,
     /// Specification of how fall delay gets calculated from the rest of the state.
     pub lock_delay_params: DelayParameters,
-    /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
-    /// Normally, lock delay only resets if rotation or movement actually succeeds.
-    pub lenient_lock_delay_reset: bool,
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
     /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
     /// This allows DAS and ARR to function at extreme game speeds.
     pub ensure_move_delay_lt_lock_delay: bool,
+    /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
+    /// Normally, lock delay only resets if rotation or movement actually succeeds.
+    pub lenient_lock_delay_reset: bool,
     /// How long each spawned active piece may touch the ground in total until it should lock down
     /// immediately.
     pub lock_reset_cap_factor: ExtNonNegF64,

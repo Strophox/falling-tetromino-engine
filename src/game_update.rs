@@ -810,11 +810,11 @@ fn do_player_input(
 
         // Rotates.
         // Just instantly try to rotate piece into applicable direction.
-        I::Activate(rotate @ (B::RotateLeft | B::RotateRight | B::RotateAround)) => {
+        I::Activate(rotate @ (B::RotateLeft | B::RotateRight | B::Rotate180)) => {
             let right_turns = match rotate {
                 B::RotateLeft => -1,
                 B::RotateRight => 1,
-                B::RotateAround => 2,
+                B::Rotate180 => 2,
                 _ => unreachable!(),
             };
 
@@ -882,7 +882,7 @@ fn do_player_input(
         I::Deactivate(
             B::RotateLeft
             | B::RotateRight
-            | B::RotateAround
+            | B::Rotate180
             | B::DropSoft
             | B::DropHard
             | B::TeleDown
@@ -1012,7 +1012,7 @@ fn do_player_input(
                     B::MoveLeft
                         | B::MoveRight
                         | B::RotateLeft
-                        | B::RotateAround
+                        | B::Rotate180
                         | B::RotateRight
                         | B::TeleLeft
                         | B::TeleDown

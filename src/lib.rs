@@ -298,7 +298,7 @@ pub enum Button {
     /// Rotate the piece by -90° (counter-clockwise).
     RotateRight,
     /// Rotate the piece by 180° (flip around).
-    RotateAround,
+    Rotate180,
     /// "Soft" dropping.
     /// This drops a piece down by one, locking it immediately if it hit a surface,
     /// Otherwise holding this button decreases fall speed by the game [`Configuration`]'s `soft_drop_factor`.
@@ -933,7 +933,7 @@ impl Button {
             B::MoveRight,
             B::RotateLeft,
             B::RotateRight,
-            B::RotateAround,
+            B::Rotate180,
             B::DropSoft,
             B::DropHard,
             B::TeleDown,

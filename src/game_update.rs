@@ -5,6 +5,26 @@ This module handles what happens when [`Game::update`] is called.
 use super::*;
 
 impl Game {
+    /// Immediately end a game by forfeiting the current round.
+    ///
+    /// This can be used so `game.has_ended()` returns true and prevents future
+    /// calls to `update` from continuing to advance the game.
+    pub fn forfeit(&mut self) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
+        if self.has_ended() {
+            // Do not allow updating a game that has already ended.
+            return Err(UpdateGameError::AlreadyEnded);
+        }
+
+        let is_win = false;
+
+        self.phase = Phase::GameEnd {
+            cause: GameEndCause::Forfeit,
+            is_win,
+        };
+
+        Ok(vec![(self.state.time, Feedback::GameEnded { is_win })])
+    }
+
     /// The main function used to advance the game state.
     ///
     /// This will cause an internal update of the game's state up to and including the given
@@ -32,9 +52,9 @@ impl Game {
         if target_time < self.state.time {
             // Do not allow updating if target time lies in the past.
             return Err(UpdateGameError::TargetTimeInPast);
-        } else if self.result().is_some() {
+        } else if self.has_ended() {
             // Do not allow updating a game that has already ended.
-            return Err(UpdateGameError::GameEnded);
+            return Err(UpdateGameError::AlreadyEnded);
         }
 
         // Prepare new button state.
@@ -58,9 +78,9 @@ impl Game {
             match self.phase {
                 // Game ended by now.
                 // Return accumulated messages.
-                Phase::GameEnd { result } => {
+                Phase::GameEnd { cause: _, is_win } => {
                     // Add message that game ended.
-                    feedback_msgs.push((self.state.time, Feedback::GameEnded { result }));
+                    feedback_msgs.push((self.state.time, Feedback::GameEnded { is_win }));
 
                     // Return early.
                     return Ok(feedback_msgs);
@@ -183,21 +203,25 @@ impl Game {
     #[allow(clippy::manual_map)]
     fn try_end_game_if_end_condition_met(&self) -> Option<Phase> {
         // Game already ended.
-        if self.result().is_some() {
-            None
+        if self.has_ended() {
+            return None;
 
-        // Not ended yet, so check whether any end conditions have been met now and return appropriate phase if yes.
-        } else if let Some(result) = self.config.end_conditions.iter().find_map(|(stat, good)| {
-            self.check_stat_met(stat).then_some(if *good {
-                Ok(*stat)
-            } else {
-                Err(GameOver::Limit(*stat))
-            })
-        }) {
-            Some(Phase::GameEnd { result })
-        } else {
-            None
+            // Not ended yet, so check whether any end conditions have been met now and return appropriate phase if yes.
         }
+
+        self.config
+            .end_conditions
+            .iter()
+            .find_map(|&(stat, is_win_condition)| {
+                if self.check_stat_met(stat) {
+                    Some(Phase::GameEnd {
+                        cause: GameEndCause::Limit(stat),
+                        is_win: is_win_condition,
+                    })
+                } else {
+                    None
+                }
+            })
     }
 
     /// Goes through all internal 'game mods' and applies them sequentially at the given [`ModifierPoint`].
@@ -352,7 +376,8 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
         }
     } else {
         Phase::GameEnd {
-            result: Err(GameOver::BlockOut),
+            cause: GameEndCause::BlockOut,
+            is_win: false,
         }
     }
 }
@@ -1079,7 +1104,8 @@ fn do_lock(
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
     if entirely_above_skyline {
         return Phase::GameEnd {
-            result: Err(GameOver::LockOut),
+            cause: GameEndCause::LockOut,
+            is_win: false,
         };
     }
 

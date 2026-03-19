@@ -78,8 +78,6 @@ pub type GameModFn = dyn FnMut(
     &mut Phase,
     &mut Vec<FeedbackMsg>,
 );
-/// The result of a game that ended.
-pub type GameResult = Result<Stat, GameOver>;
 
 /// Type alias to denote [`Feedback`] associated with some [`InGameTime`].
 pub type FeedbackMsg = (InGameTime, Feedback);
@@ -366,19 +364,22 @@ pub struct State {
 }
 
 /// Represents how a game can end.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum GameOver {
+pub enum GameEndCause {
     /// 'Lock out' denotes the most recent piece being completely locked down at
     /// or above [`Game::SKYLINE_HEIGHT`].
     LockOut,
     /// 'Block out' denotes a new piece being unable to spawn due to pre-existing board tile
     /// blocking one or several of the spawn cells.
     BlockOut,
-    /// Generic game over by having reached a (negative) game limit.
+    /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
-    /// Generic game over by player forfeit.
+    /// Game ended by player forfeit.
     Forfeit,
+    /// Custom game over.
+    /// This is unused in the base engine and intended for modding.
+    Custom(String),
 }
 
 /// Locking details stored about an active piece in play.
@@ -400,7 +401,7 @@ pub struct PieceData {
 }
 
 /// An event that is scheduled by the game engine to execute some action.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Phase {
     /// The state of the game "taking its time" to spawn a piece.
@@ -424,8 +425,10 @@ pub enum Phase {
     },
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
-        /// The result of how the game ended.
-        result: GameResult,
+        /// The cause of why the game ended.
+        cause: GameEndCause,
+        /// Whether the ending is considered a win.
+        is_win: bool,
     },
 }
 
@@ -564,15 +567,15 @@ pub enum Feedback {
     },
     /// Message that the game has ended.
     GameEnded {
-        /// Outcome of the game.
-        result: GameResult,
+        /// Whether it was a win or a loss.
+        is_win: bool,
     },
     /// A message containing an exact in-engine `UpdatePoint` that was processed.
     Debug(UpdatePoint<String>),
     /// Generic text feedback message.
     ///
     /// This is currently unused in the base engine.
-    Text(String),
+    Message(String),
 }
 
 /// An error that can be thrown by [`Game::update`].
@@ -582,7 +585,7 @@ pub enum UpdateGameError {
     /// the game's past (` < game.state().time`).
     TargetTimeInPast,
     /// Error variant caused by an attempt to update a game that has ended (`game.ended() == true`).
-    GameEnded,
+    AlreadyEnded,
 }
 
 impl Tetromino {
@@ -736,6 +739,24 @@ impl Piece {
             }
         }
         piece
+    }
+}
+
+impl std::fmt::Display for GameEndCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            GameEndCause::LockOut => "Lock out",
+            GameEndCause::BlockOut => "Block out",
+            GameEndCause::Limit(stat) => match stat {
+                Stat::TimeElapsed(_) => "Time limit reached",
+                Stat::PiecesLocked(_) => "Piece limit reached",
+                Stat::LinesCleared(_) => "Line limit reached",
+                Stat::PointsScored(_) => "Score limit reached",
+            },
+            GameEndCause::Forfeit => "Forfeited",
+            GameEndCause::Custom(text) => text,
+        };
+        write!(f, "{s}")
     }
 }
 
@@ -995,11 +1016,8 @@ impl Game {
     }
 
     /// Whether the game has ended, and whether it can continue to update.
-    pub const fn result(&self) -> Option<GameResult> {
-        match self.phase {
-            Phase::GameEnd { result } => Some(result),
-            _ => None,
-        }
+    pub const fn has_ended(&self) -> bool {
+        matches!(self.phase, Phase::GameEnd { .. })
     }
 
     /// Retrieve the when the next *autonomous* in-game update is scheduled.
@@ -1051,30 +1069,13 @@ impl Game {
     }
 
     /// Check whether a certain stat value has been met or exceeded.
-    pub fn check_stat_met(&self, stat: &Stat) -> bool {
+    pub fn check_stat_met(&self, stat: Stat) -> bool {
         match stat {
-            Stat::TimeElapsed(t) => *t <= self.state.time,
-            Stat::PiecesLocked(p) => *p <= self.state.pieces_locked.iter().sum(),
-            Stat::LinesCleared(l) => *l <= self.state.lineclears,
-            Stat::PointsScored(s) => *s <= self.state.score,
+            Stat::TimeElapsed(t) => t <= self.state.time,
+            Stat::PiecesLocked(p) => p <= self.state.pieces_locked.iter().sum(),
+            Stat::LinesCleared(l) => l <= self.state.lineclears,
+            Stat::PointsScored(s) => s <= self.state.score,
         }
-    }
-
-    /// Immediately end a game by forfeiting the current round.
-    ///
-    /// This can be used so `game.ended()` returns true and prevents future
-    /// calls to `update` from continuing to advance the game.
-    pub const fn forfeit(&mut self) -> FeedbackMsg {
-        self.phase = Phase::GameEnd {
-            result: Err(GameOver::Forfeit),
-        };
-
-        (
-            self.state.time,
-            Feedback::GameEnded {
-                result: Err(GameOver::Forfeit),
-            },
-        )
     }
 
     /// Creates an identical, independent copy of the game but without any modifiers.
@@ -1083,7 +1084,7 @@ impl Game {
             config: self.config.clone(),
             state_init: self.state_init,
             state: self.state.clone(),
-            phase: self.phase,
+            phase: self.phase.clone(),
             modifiers: Vec::new(),
         }
     }
@@ -1095,7 +1096,7 @@ impl std::fmt::Display for UpdateGameError {
             UpdateGameError::TargetTimeInPast => {
                 "attempt to update game to timestamp it already passed"
             }
-            UpdateGameError::GameEnded => "attempt to update game after it ended",
+            UpdateGameError::AlreadyEnded => "attempt to update game after it already ended",
         };
         write!(f, "{s}")
     }

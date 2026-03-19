@@ -1085,10 +1085,6 @@ fn do_lock(
     lock_time: InGameTime,
     feedback_msgs: &mut Vec<FeedbackMsg>,
 ) -> Phase {
-    if config.feedback_verbosity != FeedbackVerbosity::Silent {
-        feedback_msgs.push((lock_time, Feedback::PieceLocked { piece }));
-    }
-
     // Before board is changed, precompute whether a piece was 'spun' into position;
     // - 'Spun' pieces give higher score bonus.
     // - Only locked pieces can yield bonus (i.e. can't possibly move down).
@@ -1116,6 +1112,10 @@ fn do_lock(
     for ((x, y), tile_type_id) in piece.tiles() {
         // Put tile into board.
         state.board[y as usize][x as usize] = Some(tile_type_id);
+    }
+
+    if config.feedback_verbosity != FeedbackVerbosity::Silent {
+        feedback_msgs.push((lock_time, Feedback::PieceLocked { piece }));
     }
 
     // Update tally of pieces_locked.

@@ -1100,13 +1100,13 @@ fn do_lock(
     // That's what a 'spin' is.
     let is_spin = piece.offset_on(&state.board, (0, 1)).is_err();
 
-    let fits_below_skyline = piece
+    let any_below_skyline = piece
         .tiles()
         .iter()
-        .all(|&((_, y), _)| (y as usize) < Game::LOCK_OUT_HEIGHT);
+        .any(|&((_, y), _)| (y as usize) < Game::LOCK_OUT_HEIGHT);
 
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
-    if !fits_below_skyline {
+    if !any_below_skyline {
         return Phase::GameEnd {
             cause: GameEndCause::LockOut {
                 locked_out_piece: piece,

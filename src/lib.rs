@@ -18,13 +18,13 @@ let mut game = Game::builder()
 // Updating the game with the info that 'left' should be pressed at second 4.2;
 // If a piece is in the game, it will try to move left.
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs(4.2), Some(input));
+game.update(InGameTime::from_secs_f64(4.2), Some(input));
 
 // ...
 
 // Updating the game with the info that no input change has occurred up to second 6.79;
 // This updates the game, e.g., pieces fall and lock.
-game.update(InGameTime::from_secs(13.37), None);
+game.update(InGameTime::from_secs_f64(13.37), None);
 
 // Read most recent game state;
 // This is how a UI can know how to render the board, etc.
@@ -160,7 +160,7 @@ pub struct Piece {
 ///
 /// # Example
 /// The formulation used for calculation of fall delay is conceptually:
-/// ```
+/// ```ignore
 /// let fall_delay = |lineclears| {
 ///     initial_fall_delay.mul_ennf64(
 ///         multiplier.get().powf(lineclears) - subtrahend.get() * lineclears
@@ -495,15 +495,15 @@ pub enum UpdatePoint<T> {
 /// Type of named modifiers that can be used to mod a game, c.f. [`GameBuilder::build_modded`].
 pub struct Modifier {
     /// Given a function which produces a modifier ready to be attached to a game,
-    /// ```rust
+    /// ```ignore
     /// fn modifier(arg1: T1, ..., argX: TX) -> Modifier;
     /// ```
     /// or alternatively a builder function which builds a modified game,
-    /// ```rust
+    /// ```ignore
     /// fn build(builder: &GameBuilder, arg1: T1, ..., argX: TX) -> Game;
     /// ```
     /// Then, by convention, the modifier descriptor should be produced as
-    /// ```rust
+    /// ```ignore
     /// let mod_args = serde_json::to_string(&(arg1, ..., argX)).unwrap();
     /// let descriptor = format!("{MOD_ID}\n{mod_args}");
     /// ``````
@@ -521,7 +521,7 @@ pub struct Modifier {
     /// is actually reconstructible or reproducible.
     pub descriptor: String,
     /// The function object which will be called at runtime.
-    /// ```rust
+    /// ```ignore
     /// mod_function = |point, config, init_vals, state, phase, msgs| { /* ... */ };
     /// ```
     ///

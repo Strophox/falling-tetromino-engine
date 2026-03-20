@@ -109,14 +109,14 @@ struct Configuration {
     delayed_auto_shift: Duration,
     auto_repeat_rate: Duration,
     fall_delay_params: DelayParameters,
-    soft_drop_divisor: ExtNonNegF64,
+    soft_drop_factor: ExtNonNegF64,
     lock_delay_params: DelayParameters,
     ensure_move_delay_lt_lock_delay: bool,
-    lenient_lock_delay_reset: bool,
+    allow_lenient_lock_reset: bool,
     lock_reset_cap_factor: ExtNonNegF64,
     line_clear_duration: Duration,
     update_delays_every_n_lineclears: u32,
-    end_conditions: Vec<(Stat, bool)>,
+    game_limits: Vec<(Stat, bool)>,
     feedback_verbosity: FeedbackVerbosity,
 }
 

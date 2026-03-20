@@ -104,6 +104,15 @@ impl Game {
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
                     self.state.time = clear_finish_time;
 
+                    for (stat, is_win_condition) in self.config.game_limits.iter() {
+                        if self.check_stat_met(stat) {
+                            self.phase = Phase::GameEnd {
+                                cause: GameEndCause::Limit(stat),
+                                is_win: is_win_condition,
+                            };
+                        }
+                    }
+
                     // Return from update due to game end.
                     self.run_mods(UpdatePoint::LinesCleared, &mut feedback_msgs);
                 }
@@ -168,15 +177,6 @@ impl Game {
                         &mut feedback_msgs,
                     );
                     self.state.time = piece_data.fall_or_lock_time;
-
-                    for (stat, is_win_condition) in self.config.game_limits.iter() {
-                        if self.check_stat_met(stat) {
-                            self.phase = Phase::GameEnd {
-                                cause: GameEndCause::Limit(stat),
-                                is_win: is_win_condition,
-                            };
-                        }
-                    }
 
                     self.run_mods(UpdatePoint::PieceLocked, &mut feedback_msgs);
                 }
@@ -262,19 +262,6 @@ impl Game {
             );
         }
     }
-}
-
-fn calc_updated_active_buttons(
-    mut previous_active_buttons: ButtonsState,
-    input: Input,
-    input_time: InGameTime,
-) -> ButtonsState {
-    match input {
-        Input::Activate(button) => previous_active_buttons[button] = Some(input_time),
-        Input::Deactivate(button) => previous_active_buttons[button] = None,
-    }
-
-    previous_active_buttons
 }
 
 fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -> Phase {
@@ -422,61 +409,32 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     }
 }
 
-fn do_lines_clearing(
-    config: &Configuration,
+fn try_do_hold(
     state: &mut State,
-    clear_finish_time: InGameTime,
-) -> Phase {
-    for y in (0..Game::HEIGHT).rev() {
-        // Full line: move it to the cleared lines storage and push an empty line to the board.
-        if state.board[y].iter().all(|tile| tile.is_some()) {
-            // Starting from the offending line, we move down all others, then default the uppermost.
-            state.board[y..].rotate_left(1);
-            // FIXME: This could underflow.
-            state.board[Game::HEIGHT - 1] = Line::default();
-            state.lineclears += 1;
-
-            // Increment level if update requested.
-            if state.lineclears % config.update_delays_every_n_lineclears == 0 {
-                // Calculate new fall- and lock delay for game state.
-                (state.fall_delay, state.lock_delay) = calc_fall_and_lock_delay(
-                    &config.fall_delay_params,
-                    &config.lock_delay_params,
-                    state.fall_delay_lowerbound_hit_at_n_lineclears,
-                    state.lineclears,
-                );
-
-                // Remember the first time fall delay hit zero.
-                if state.fall_delay == config.fall_delay_params.lowerbound
-                    && state.fall_delay_lowerbound_hit_at_n_lineclears.is_none()
-                {
-                    state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
-                }
-            }
+    tetromino: Tetromino,
+    next_spawn_time: InGameTime,
+) -> Option<Phase> {
+    match state.piece_held {
+        // Nothing held yet, just hold spawned tetromino.
+        None => {
+            state.piece_held = Some((tetromino, false));
+            // Issue a spawn.
+            Some(Phase::Spawning {
+                spawn_time: next_spawn_time,
+            })
         }
-    }
-
-    Phase::Spawning {
-        spawn_time: clear_finish_time.saturating_add(config.spawn_delay),
-    }
-}
-
-fn check_piece_became_movable_get_moved_piece(
-    previous_piece: Piece,
-    updated_piece: Piece,
-    board: &Board,
-    dx: isize,
-) -> Option<Piece> {
-    let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
-    let moved_updated_piece = updated_piece.offset_on(board, (dx, 0));
-
-    if let (Err(_), Ok(valid_moved_piece)) = (moved_previous_piece, moved_updated_piece) {
-        Some(valid_moved_piece)
-
-    // No changes need to be made after all.
-    // This is the case where neither (³) or (⁴) apply.
-    } else {
-        None
+        // Swap spawned tetromino, push held back into next pieces queue.
+        Some((held_tet, true)) => {
+            state.piece_held = Some((tetromino, false));
+            // Cause the next spawn to specially be the piece we held.
+            state.piece_preview.push_front(held_tet);
+            // Issue a spawn.
+            Some(Phase::Spawning {
+                spawn_time: next_spawn_time,
+            })
+        }
+        // Else can't hold, don't do anything.
+        _ => None,
     }
 }
 
@@ -629,7 +587,7 @@ fn do_fall(
 
     let updated_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time
     {
-        if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
+        if let Some(moved_piece) = calc_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
             updated_piece,
             &state.board,
@@ -890,7 +848,7 @@ fn do_player_input(
         }
 
         // Movement.
-        // This is relatively very complicated; The logic is based on the comment in (³).
+        // This is relatively complicated; The logic is based on the comment in (³).
         I::Activate(B::MoveLeft | B::MoveRight) | I::Deactivate(B::MoveLeft | B::MoveRight) => {
             let prev_l = state.active_buttons[B::MoveLeft];
             let prev_r = state.active_buttons[B::MoveRight];
@@ -969,7 +927,7 @@ fn do_player_input(
 
         // Due to the system mentioned in (⁴), we do need to check
         // if the piece was stuck and became unstuck, and manually do a move in this case!
-        if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
+        if let Some(moved_piece) = calc_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
             updated_piece,
             &state.board,
@@ -1084,35 +1042,6 @@ fn do_player_input(
     }
 }
 
-fn try_do_hold(
-    state: &mut State,
-    tetromino: Tetromino,
-    next_spawn_time: InGameTime,
-) -> Option<Phase> {
-    match state.piece_held {
-        // Nothing held yet, just hold spawned tetromino.
-        None => {
-            state.piece_held = Some((tetromino, false));
-            // Issue a spawn.
-            Some(Phase::Spawning {
-                spawn_time: next_spawn_time,
-            })
-        }
-        // Swap spawned tetromino, push held back into next pieces queue.
-        Some((held_tet, true)) => {
-            state.piece_held = Some((tetromino, false));
-            // Cause the next spawn to specially be the piece we held.
-            state.piece_preview.push_front(held_tet);
-            // Issue a spawn.
-            Some(Phase::Spawning {
-                spawn_time: next_spawn_time,
-            })
-        }
-        // Else can't hold, don't do anything.
-        _ => None,
-    }
-}
-
 fn do_lock(
     config: &Configuration,
     state: &mut State,
@@ -1137,7 +1066,7 @@ fn do_lock(
     if !any_below_skyline {
         return Phase::GameEnd {
             cause: GameEndCause::LockOut {
-                locked_out_piece: piece,
+                locking_piece: piece,
             },
             is_win: false,
         };
@@ -1232,13 +1161,65 @@ fn do_lock(
     }
 }
 
+fn do_lines_clearing(
+    config: &Configuration,
+    state: &mut State,
+    clear_finish_time: InGameTime,
+) -> Phase {
+    for y in (0..Game::HEIGHT).rev() {
+        // Full line: move it to the cleared lines storage and push an empty line to the board.
+        if state.board[y].iter().all(|tile| tile.is_some()) {
+            // Starting from the offending line, we move down all others, then default the uppermost.
+            state.board[y..].rotate_left(1);
+            // FIXME: This could underflow.
+            state.board[Game::HEIGHT - 1] = Line::default();
+            state.lineclears += 1;
+
+            // Increment level if update requested.
+            if state.lineclears % config.update_delays_every_n_lineclears == 0 {
+                // Calculate new fall- and lock delay for game state.
+                (state.fall_delay, state.lock_delay) = calc_fall_and_lock_delay(
+                    &config.fall_delay_params,
+                    &config.lock_delay_params,
+                    state.fall_delay_lowerbound_hit_at_n_lineclears,
+                    state.lineclears,
+                );
+
+                // Remember the first time fall delay hit zero.
+                if state.fall_delay == config.fall_delay_params.lowerbound
+                    && state.fall_delay_lowerbound_hit_at_n_lineclears.is_none()
+                {
+                    state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
+                }
+            }
+        }
+    }
+
+    Phase::Spawning {
+        spawn_time: clear_finish_time.saturating_add(config.spawn_delay),
+    }
+}
+
+fn calc_updated_active_buttons(
+    mut previous_active_buttons: ButtonsState,
+    input: Input,
+    input_time: InGameTime,
+) -> ButtonsState {
+    match input {
+        Input::Activate(button) => previous_active_buttons[button] = Some(input_time),
+        Input::Deactivate(button) => previous_active_buttons[button] = None,
+    }
+
+    previous_active_buttons
+}
+
 /// This function may return an integer = `-1` | `1` and a time at or after `move_time` for the next designated auto-move.
 /// It returns `None` when it cannot determine a direction to move to, which happens when:
 /// * Both directions were pressed at the exact same in-game time, or
 /// * No direction is pressed.
 fn calc_move_direction_and_next_move_time(
     config: &Configuration,
-    active_buttons: &[Option<InGameTime>; Button::VARIANTS.len()],
+    active_buttons: &ButtonsState,
     move_time: InGameTime,
     ensure_lt_lock_delay: Option<ExtDuration>,
 ) -> Option<(isize, InGameTime)> {
@@ -1277,6 +1258,25 @@ fn calc_move_direction_and_next_move_time(
     }
 
     Some((dx, move_time.saturating_add(move_delay)))
+}
+
+fn calc_piece_became_movable_get_moved_piece(
+    previous_piece: Piece,
+    updated_piece: Piece,
+    board: &Board,
+    dx: isize,
+) -> Option<Piece> {
+    let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
+    let moved_updated_piece = updated_piece.offset_on(board, (dx, 0));
+
+    if let (Err(_), Ok(valid_moved_piece)) = (moved_previous_piece, moved_updated_piece) {
+        Some(valid_moved_piece)
+
+    // No changes need to be made after all.
+    // This is the case where neither (³) or (⁴) apply.
+    } else {
+        None
+    }
 }
 
 // Compute the fall and lock delay corresponding to the current lineclear progress.

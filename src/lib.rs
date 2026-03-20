@@ -389,7 +389,7 @@ pub enum GameEndCause {
     /// or above [`Game::SKYLINE_HEIGHT`].
     LockOut {
         /// The offending piece that does not fit below [`Game::SKYLINE_HEIGHT`].
-        locked_out_piece: Piece,
+        locking_piece: Piece,
     },
     /// 'Block out' denotes a new piece being unable to spawn due to existing board tile(s)
     /// blocking one or several of the cells of a piece to be spawned.

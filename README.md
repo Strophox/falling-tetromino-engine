@@ -103,7 +103,7 @@ struct Game {
 
 struct Configuration {
     piece_preview_count: usize,
-    allow_prespawn_actions: bool,
+    allow_initial_actions: bool,
     rotation_system: RotationSystem,
     spawn_delay: Duration,
     delayed_auto_shift: Duration,

@@ -120,7 +120,7 @@ impl GameBuilder {
     }
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
-    pub fn allow_prespawn_actions(&mut self, x: bool) -> &mut Self {
+    pub fn allow_initial_actions(&mut self, x: bool) -> &mut Self {
         self.config.allow_initial_actions = x;
         self
     }
@@ -151,8 +151,8 @@ impl GameBuilder {
         self
     }
     /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
-    pub fn soft_drop_divisor(&mut self, x: ExtNonNegF64) -> &mut Self {
-        self.config.soft_drop_divisor = x;
+    pub fn soft_drop_factor(&mut self, x: ExtNonNegF64) -> &mut Self {
+        self.config.soft_drop_factor = x;
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.
@@ -160,9 +160,16 @@ impl GameBuilder {
         self.config.lock_delay_params = x;
         self
     }
+    /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
+    /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
+    /// This allows DAS and ARR to function at extreme game speeds.
+    pub fn ensure_move_delay_lt_lock_delay(&mut self, x: bool) -> &mut Self {
+        self.config.ensure_move_delay_lt_lock_delay = x;
+        self
+    }
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
-    pub fn lenient_lock_delay_reset(&mut self, x: bool) -> &mut Self {
+    pub fn allow_lenient_lock_reset(&mut self, x: bool) -> &mut Self {
         self.config.allow_lenient_lock_reset = x;
         self
     }
@@ -188,8 +195,8 @@ impl GameBuilder {
     /// designated by the `bool` stored with it.
     ///
     /// No limitations may allow for endless games.
-    pub fn end_conditions(&mut self, x: Vec<(Stat, bool)>) -> &mut Self {
-        self.config.end_conditions = x;
+    pub fn game_limits(&mut self, x: GameLimits) -> &mut Self {
+        self.config.game_limits = x;
         self
     }
     /// The amount of feedback information that is to be generated.

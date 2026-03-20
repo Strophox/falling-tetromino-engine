@@ -193,16 +193,30 @@ pub struct DelayParameters {
 }
 
 /// Certain statistics for which an instance of [`Game`] can be checked against.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GameLimits {
+    /// A given amount of total time that can elapse in-game.
+    pub time_elapsed: Option<(InGameTime, bool)>,
+    /// A given number of [`Tetromino`]s that can be locked/placed on the game's [`Board`].
+    pub pieces_locked: Option<(u32, bool)>,
+    /// A given number of lines that can be cleared from the [`Board`].
+    pub lines_cleared: Option<(u32, bool)>,
+    /// A given number of points that can be scored.
+    pub points_scored: Option<(u32, bool)>,
+}
+
+/// Certain statistics for which an instance of [`Game`] can be checked against.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stat {
-    /// Whether a given amount of total time has elapsed in-game.
+    /// A given amount of total time that elapsed in-game.
     TimeElapsed(InGameTime),
-    /// Whether a given number of [`Tetromino`]s have been locked/placed on the game's [`Board`].
+    /// A given number of [`Tetromino`]s that have been locked/placed on the game's [`Board`].
     PiecesLocked(u32),
-    /// Whether a given number of lines have been cleared from the [`Board`].
+    /// A given number of lines that have been cleared from the [`Board`].
     LinesCleared(u32),
-    /// Whether a given number of points has been scored already.
+    /// A given number of points that have been scored.
     PointsScored(u32),
 }
 
@@ -248,7 +262,7 @@ pub struct Configuration {
     /// Specification of how fall delay gets calculated from the rest of the state.
     pub fall_delay_params: DelayParameters,
     /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
-    pub soft_drop_divisor: ExtNonNegF64,
+    pub soft_drop_factor: ExtNonNegF64,
     /// Specification of how fall delay gets calculated from the rest of the state.
     pub lock_delay_params: DelayParameters,
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
@@ -271,7 +285,7 @@ pub struct Configuration {
     /// designated by the `bool` stored with it.
     ///
     /// No limitations may allow for endless games.
-    pub end_conditions: Vec<(Stat, bool)>,
+    pub game_limits: GameLimits,
     /// The amount of feedback information that is to be generated.
     pub feedback_verbosity: FeedbackVerbosity,
 }
@@ -939,6 +953,43 @@ impl DelayParameters {
     }
 }
 
+impl GameLimits {
+    /// Create a fresh [`GameLimits`] without any limits.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new [`GameLimits`] with a single [`Stat`] as the limit.
+    pub fn single(stat: Stat, is_win: bool) -> Self {
+        let mut new = Self::new();
+
+        match stat {
+            Stat::TimeElapsed(t) => new.time_elapsed = Some((t, is_win)),
+            Stat::PiecesLocked(p) => new.pieces_locked = Some((p, is_win)),
+            Stat::LinesCleared(l) => new.lines_cleared = Some((l, is_win)),
+            Stat::PointsScored(s) => new.points_scored = Some((s, is_win)),
+        };
+
+        new
+    }
+
+    /// Iterate over all limiting [`Stat`] contained in a [`GameLimits`] struct.
+    pub fn iter(&self) -> impl Iterator<Item = (Stat, bool)> {
+        [
+            self.time_elapsed
+                .map(|(t, is_win)| (Stat::TimeElapsed(t), is_win)),
+            self.pieces_locked
+                .map(|(p, is_win)| (Stat::PiecesLocked(p), is_win)),
+            self.lines_cleared
+                .map(|(l, is_win)| (Stat::LinesCleared(l), is_win)),
+            self.points_scored
+                .map(|(s, is_win)| (Stat::PointsScored(s), is_win)),
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
 impl Button {
     /// All `Button` enum variants.
     ///
@@ -985,14 +1036,14 @@ impl Default for Configuration {
             delayed_auto_shift: Duration::from_millis(167),
             auto_repeat_rate: Duration::from_millis(33),
             fall_delay_params: DelayParameters::constant(Duration::from_millis(1000).into()),
-            soft_drop_divisor: ExtNonNegF64::new(15.0).unwrap(),
+            soft_drop_factor: ExtNonNegF64::new(15.0).unwrap(),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
             allow_lenient_lock_reset: false,
             ensure_move_delay_lt_lock_delay: false,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,
-            end_conditions: Default::default(),
+            game_limits: Default::default(),
             feedback_verbosity: FeedbackVerbosity::default(),
         }
     }
@@ -1102,11 +1153,9 @@ impl Game {
         };
 
         // Check against time-related end conditions.
-        for &(stat, _) in &self.config.end_conditions {
-            if let Stat::TimeElapsed(time_limit) = stat {
-                if time_limit < update_time {
-                    update_time = time_limit;
-                }
+        if let Some((time_limit, _)) = self.config.game_limits.time_elapsed {
+            if time_limit < update_time {
+                update_time = time_limit;
             }
         }
 

@@ -73,12 +73,15 @@ impl Game {
                 &mut feedback_msgs,
             );
 
-            // Maybe move on to game over if an end condition is met now.
-            for (stat, is_win_condition) in &self.config.end_conditions {
-                if self.check_stat_met(*stat) {
+            // Maybe move on to game over if time condition is met now.
+            if let Some((time_limit, is_win)) = self.config.game_limits.time_elapsed {
+                // FIXME: We actually end the game *after* an event was processed that moved us beyond the time limit.
+                // A different way would be to end the game *exactly* at the time limit and before processing such an event,
+                // but this requires more complicated logic.
+                if time_limit <= self.state.time {
                     self.phase = Phase::GameEnd {
-                        cause: GameEndCause::Limit(*stat),
-                        is_win: *is_win_condition,
+                        cause: GameEndCause::Limit(Stat::TimeElapsed(time_limit)),
+                        is_win,
                     };
                 }
             }
@@ -115,59 +118,70 @@ impl Game {
                     self.run_mods(UpdatePoint::PieceSpawned, &mut feedback_msgs);
                 }
 
-                // Piece autonomously moving / falling / locking.
-                // - Locking may move on to game over (LockOut).
-                Phase::PieceInPlay { piece_data }
-                    if (piece_data.fall_or_lock_time <= target_time
-                        || piece_data
-                            .auto_move_scheduled
-                            .is_some_and(|move_time| move_time <= target_time)) =>
+                // Piece Auto-moving.
+                Phase::PieceInPlay {
+                    piece_data:
+                        piece_data @ PieceData {
+                            auto_move_scheduled: Some(auto_move_time),
+                            ..
+                        },
+                } if auto_move_time <= target_time
+                    && auto_move_time <= piece_data.fall_or_lock_time =>
                 {
-                    let mut flag = false;
-                    if let Some(move_time) = piece_data.auto_move_scheduled {
-                        if move_time <= piece_data.fall_or_lock_time && move_time <= target_time {
-                            // Piece is moving autonomously and before next fall/lock.
-                            flag = true;
+                    self.phase = do_autonomous_move(
+                        &self.config,
+                        &mut self.state,
+                        piece_data,
+                        auto_move_time,
+                    );
+                    self.state.time = auto_move_time;
 
-                            self.phase = do_autonomous_move(
-                                &self.config,
-                                &mut self.state,
-                                piece_data,
-                                move_time,
-                            );
-                            self.state.time = move_time;
-
-                            self.run_mods(UpdatePoint::PieceAutoMoved, &mut feedback_msgs);
-                        }
-                    }
-                    // else: Piece is not moving autonomously and instead falls or locks
-                    if !flag {
-                        if piece_data.is_fall_not_lock {
-                            self.phase = do_fall(
-                                &self.config,
-                                &mut self.state,
-                                piece_data,
-                                piece_data.fall_or_lock_time,
-                            );
-                            self.state.time = piece_data.fall_or_lock_time;
-
-                            self.run_mods(UpdatePoint::PieceFell, &mut feedback_msgs);
-                        } else {
-                            self.phase = do_lock(
-                                &self.config,
-                                &mut self.state,
-                                piece_data.piece,
-                                piece_data.fall_or_lock_time,
-                                &mut feedback_msgs,
-                            );
-                            self.state.time = piece_data.fall_or_lock_time;
-
-                            self.run_mods(UpdatePoint::PieceLocked, &mut feedback_msgs);
-                        }
-                    }
+                    self.run_mods(UpdatePoint::PieceAutoMoved, &mut feedback_msgs);
                 }
 
-                // Piece acted upon by player.
+                // Piece falling.
+                Phase::PieceInPlay { piece_data }
+                    if piece_data.fall_or_lock_time <= target_time
+                        && piece_data.is_fall_not_lock =>
+                {
+                    self.phase = do_fall(
+                        &self.config,
+                        &mut self.state,
+                        piece_data,
+                        piece_data.fall_or_lock_time,
+                    );
+                    self.state.time = piece_data.fall_or_lock_time;
+
+                    self.run_mods(UpdatePoint::PieceFell, &mut feedback_msgs);
+                }
+
+                // Piece locking.
+                Phase::PieceInPlay { piece_data }
+                    if piece_data.fall_or_lock_time <= target_time
+                        && !piece_data.is_fall_not_lock =>
+                {
+                    self.phase = do_lock(
+                        &self.config,
+                        &mut self.state,
+                        piece_data.piece,
+                        piece_data.fall_or_lock_time,
+                        &mut feedback_msgs,
+                    );
+                    self.state.time = piece_data.fall_or_lock_time;
+
+                    for (stat, is_win_condition) in self.config.game_limits.iter() {
+                        if self.check_stat_met(stat) {
+                            self.phase = Phase::GameEnd {
+                                cause: GameEndCause::Limit(stat),
+                                is_win: is_win_condition,
+                            };
+                        }
+                    }
+
+                    self.run_mods(UpdatePoint::PieceLocked, &mut feedback_msgs);
+                }
+
+                // Piece being manipulated by player.
                 Phase::PieceInPlay { piece_data } if player_input.is_some() => {
                     let Some(input) = player_input.take() else {
                         unreachable!()
@@ -184,7 +198,6 @@ impl Game {
                         target_time,
                         &mut feedback_msgs,
                     );
-
                     self.state.time = target_time;
                     self.state.active_buttons = updated_active_buttons;
 
@@ -521,7 +534,7 @@ fn do_autonomous_move(
             // Refresh fall timer if we *started* falling.
             auto_move_time.saturating_add(
                 if state.active_buttons[Button::DropSoft].is_some() {
-                    state.fall_delay.div_ennf64(config.soft_drop_divisor)
+                    state.fall_delay.div_ennf64(config.soft_drop_factor)
                 } else {
                     state.fall_delay
                 }
@@ -660,7 +673,7 @@ fn do_fall(
     let updated_fall_or_lock_time = if updated_is_fall_not_lock {
         fall_time.saturating_add(
             if state.active_buttons[Button::DropSoft].is_some() {
-                state.fall_delay.div_ennf64(config.soft_drop_divisor)
+                state.fall_delay.div_ennf64(config.soft_drop_factor)
             } else {
                 state.fall_delay
             }
@@ -1011,7 +1024,7 @@ fn do_player_input(
             // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.
             input_time.saturating_add(
                 if updated_active_buttons[Button::DropSoft].is_some() {
-                    state.fall_delay.div_ennf64(config.soft_drop_divisor)
+                    state.fall_delay.div_ennf64(config.soft_drop_factor)
                 } else {
                     state.fall_delay
                 }

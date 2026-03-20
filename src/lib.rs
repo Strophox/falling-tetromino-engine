@@ -64,6 +64,10 @@ pub type Board = [Line; Game::HEIGHT];
 pub type Coord = (isize, isize);
 /// Coordinates offsets that can be [`add`]ed to [`Coord`]inates.
 pub type CoordOffset = (isize, isize);
+/// Type describing the state that is stored about buttons.
+///
+/// Specifically, it stores which buttons are considered active, and if yes, since when.
+pub type ButtonsState = [Option<InGameTime>; Button::VARIANTS.len()];
 
 /// The type used to identify points in time in a game's internal timeline.
 pub type InGameTime = Duration;
@@ -231,7 +235,7 @@ pub struct Configuration {
     pub piece_preview_count: usize,
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
-    pub allow_prespawn_actions: bool,
+    pub allow_initial_actions: bool,
     /// The method of tetromino rotation used.
     pub rotation_system: RotationSystem,
     /// How long the game should take to spawn a new piece.
@@ -253,7 +257,7 @@ pub struct Configuration {
     pub ensure_move_delay_lt_lock_delay: bool,
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
-    pub lenient_lock_delay_reset: bool,
+    pub allow_lenient_lock_reset: bool,
     /// How long each spawned active piece may touch the ground in total until it should lock down
     /// immediately.
     pub lock_reset_cap_factor: ExtNonNegF64,
@@ -335,8 +339,8 @@ pub enum Input {
 pub struct State {
     /// Current in-game time.
     pub time: InGameTime,
-    /// The current state of buttons being pressed in the game.
-    pub buttons_pressed: [Option<InGameTime>; Button::VARIANTS.len()],
+    /// The stores which buttons are considered active and since when.
+    pub active_buttons: ButtonsState,
     /// The internal pseudo random number generator used.
     pub rng: GameRng,
     /// The method (and internal state) of tetromino generation used.
@@ -410,7 +414,7 @@ pub struct PieceData {
     /// The lowest recorded vertical position of the main piece.
     pub lowest_y: isize,
     /// The time after which the active piece will immediately lock upon touching ground.
-    pub capped_lock_time: InGameTime,
+    pub lock_time_cap: InGameTime,
     /// Optional time of the next move event.
     pub auto_move_scheduled: Option<InGameTime>,
 }
@@ -436,7 +440,7 @@ pub enum Phase {
     /// After exiting this state, the
     LinesClearing {
         /// The in-game time at which the game moves on to the next `Phase.`
-        line_clears_finish_time: InGameTime,
+        clear_finish_time: InGameTime,
     },
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
@@ -560,9 +564,9 @@ pub enum Feedback {
     /// A piece was quickly dropped from its original position to a new one.
     HardDrop {
         /// Information about the old state of the hard-dropped piece.
-        old_piece: Piece,
+        previous_piece: Piece,
         /// Information about the new state of the hard-dropped piece.
-        new_piece: Piece,
+        updated_piece: Piece,
     },
     /// The player cleared some lines with a number of other stats that might have increased their
     /// score bonus.
@@ -585,8 +589,10 @@ pub enum Feedback {
         /// Whether it was a win or a loss.
         is_win: bool,
     },
-    /// A message containing an exact in-engine `UpdatePoint` that was processed.
-    Debug(UpdatePoint<String>),
+    /// A message containing debug information.
+    ///
+    /// This feedback type is only generated on [`FeedbackVerbosity::Debug`]
+    Debug(String),
     /// Generic text feedback message.
     ///
     /// This is currently unused in the base engine.
@@ -711,12 +717,16 @@ impl Piece {
 
     /// Checks whether the piece fits a given offset from its current location onto the board.
     pub fn offset_on(&self, board: &Board, offset: CoordOffset) -> Result<Piece, Piece> {
-        let mut new_piece = *self;
-        new_piece.position = add(self.position, offset);
-        if new_piece.fits_onto(board) {
-            Ok(new_piece)
+        let offset_piece = Piece {
+            tetromino: self.tetromino,
+            orientation: self.orientation,
+            position: add(self.position, offset),
+        };
+
+        if offset_piece.fits_onto(board) {
+            Ok(offset_piece)
         } else {
-            Err(new_piece)
+            Err(offset_piece)
         }
     }
 
@@ -728,13 +738,16 @@ impl Piece {
         right_turns: i8,
         offset: CoordOffset,
     ) -> Result<Piece, Piece> {
-        let mut new_piece = *self;
-        new_piece.orientation = new_piece.orientation.reorient_right(right_turns);
-        new_piece.position = add(self.position, offset);
-        if new_piece.fits_onto(board) {
-            Ok(new_piece)
+        let reoriented_offset_piece = Piece {
+            tetromino: self.tetromino,
+            orientation: self.orientation.reorient_right(right_turns),
+            position: add(self.position, offset),
+        };
+
+        if reoriented_offset_piece.fits_onto(board) {
+            Ok(reoriented_offset_piece)
         } else {
-            Err(new_piece)
+            Err(reoriented_offset_piece)
         }
     }
 
@@ -746,15 +759,14 @@ impl Piece {
         right_turns: i8,
         offsets: impl IntoIterator<Item = CoordOffset>,
     ) -> Option<Piece> {
-        let mut new_piece = *self;
-        new_piece.orientation = new_piece.orientation.reorient_right(right_turns);
+        let original_pos = self.position;
 
-        let old_pos = self.position;
-
+        let mut updated_piece = *self;
+        updated_piece.orientation = updated_piece.orientation.reorient_right(right_turns);
         for offset in offsets {
-            new_piece.position = add(old_pos, offset);
-            if new_piece.fits_onto(board) {
-                return Some(new_piece);
+            updated_piece.position = add(original_pos, offset);
+            if updated_piece.fits_onto(board) {
+                return Some(updated_piece);
             }
         }
 
@@ -764,17 +776,19 @@ impl Piece {
     /// Returns the position the piece would hit if it kept moving at `offset` steps.
     /// For offset `(0,0)` this function return immediately.
     pub fn teleported(&self, board: &Board, offset: CoordOffset) -> Piece {
-        let mut piece = *self;
+        let mut updated_piece = *self;
+
         if offset != (0, 0) {
             // Move piece as far as possible.
-            while let Ok(new_piece) = piece.offset_on(board, offset) {
-                if new_piece == piece {
+            while let Ok(offset_updated_piece) = updated_piece.offset_on(board, offset) {
+                if offset_updated_piece == updated_piece {
                     break;
                 }
-                piece = new_piece;
+                updated_piece = offset_updated_piece;
             }
         }
-        piece
+
+        updated_piece
     }
 }
 
@@ -965,7 +979,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Self {
             piece_preview_count: 3,
-            allow_prespawn_actions: true,
+            allow_initial_actions: true,
             rotation_system: RotationSystem::default(),
             spawn_delay: Duration::from_millis(50),
             delayed_auto_shift: Duration::from_millis(167),
@@ -973,7 +987,7 @@ impl Default for Configuration {
             fall_delay_params: DelayParameters::constant(Duration::from_millis(1000).into()),
             soft_drop_divisor: ExtNonNegF64::new(15.0).unwrap(),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
-            lenient_lock_delay_reset: false,
+            allow_lenient_lock_reset: false,
             ensure_move_delay_lt_lock_delay: false,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
@@ -1068,10 +1082,10 @@ impl Game {
     /// [`Modifier`]s may arbitrarily change game state and change or prevent precise update predictions.
     pub fn peek_next_update_time(&self) -> Option<InGameTime> {
         // Find the next autonomous game update.
-        let action_time = match self.phase {
+        let mut update_time = match self.phase {
             Phase::GameEnd { .. } => return None,
             Phase::LinesClearing {
-                line_clears_finish_time,
+                clear_finish_time: line_clears_finish_time,
             } => line_clears_finish_time,
             Phase::Spawning { spawn_time } => spawn_time,
             Phase::PieceInPlay { piece_data } => {
@@ -1087,23 +1101,16 @@ impl Game {
             }
         };
 
-        // Find all time-related end conditions.
-        let time_limits = self.config.end_conditions.iter().filter_map(|(stat, _)| {
-            if let Stat::TimeElapsed(cap_time) = stat {
-                Some(cap_time)
-            } else {
-                None
-            }
-        });
-
-        let mut min_update_time = action_time;
-        for &time_limit in time_limits {
-            if min_update_time > time_limit {
-                min_update_time = time_limit;
+        // Check against time-related end conditions.
+        for &(stat, _) in &self.config.end_conditions {
+            if let Stat::TimeElapsed(time_limit) = stat {
+                if time_limit < update_time {
+                    update_time = time_limit;
+                }
             }
         }
 
-        Some(min_update_time)
+        Some(update_time)
     }
 
     /// Check whether a certain stat value has been met or exceeded.

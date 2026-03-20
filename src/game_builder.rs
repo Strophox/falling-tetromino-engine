@@ -50,7 +50,7 @@ impl GameBuilder {
             },
             state: State {
                 time: Duration::ZERO,
-                buttons_pressed: [None; Button::VARIANTS.len()],
+                active_buttons: [None; Button::VARIANTS.len()],
                 rng: GameRng::seed_from_u64(seed),
                 piece_generator: tetromino_generator,
                 piece_preview: VecDeque::new(),
@@ -121,7 +121,7 @@ impl GameBuilder {
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
     pub fn allow_prespawn_actions(&mut self, x: bool) -> &mut Self {
-        self.config.allow_prespawn_actions = x;
+        self.config.allow_initial_actions = x;
         self
     }
     /// The method of tetromino rotation used.
@@ -163,7 +163,7 @@ impl GameBuilder {
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
     pub fn lenient_lock_delay_reset(&mut self, x: bool) -> &mut Self {
-        self.config.lenient_lock_delay_reset = x;
+        self.config.allow_lenient_lock_reset = x;
         self
     }
     /// How long each spawned active piece may touch the ground in total until it should lock down

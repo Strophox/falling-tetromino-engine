@@ -54,7 +54,7 @@ impl Game {
     pub fn update(
         &mut self,
         target_time: InGameTime,
-        mut input: Option<Input>,
+        mut player_input: Option<Input>,
     ) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
         if target_time < self.state.time {
             // Do not allow updating if target time lies in the past.
@@ -64,23 +64,24 @@ impl Game {
             return Err(UpdateGameError::AlreadyEnded);
         }
 
-        // Prepare new button state.
-        let mut new_state_buttons_pressed = self.state.buttons_pressed;
-        match input {
-            Some(Input::Activate(button)) => new_state_buttons_pressed[button] = Some(target_time),
-            Some(Input::Deactivate(button)) => new_state_buttons_pressed[button] = None,
-            None => {}
-        }
-
         let mut feedback_msgs = Vec::new();
 
         // We linearly process all events until we reach the targeted update time.
         loop {
+            self.run_mods(
+                UpdatePoint::MainLoopHead(&mut player_input),
+                &mut feedback_msgs,
+            );
+
             // Maybe move on to game over if an end condition is met now.
-            if let Some(new_phase) = self.try_end_game_if_end_condition_met() {
-                self.phase = new_phase;
+            for (stat, is_win_condition) in &self.config.end_conditions {
+                if self.check_stat_met(*stat) {
+                    self.phase = Phase::GameEnd {
+                        cause: GameEndCause::Limit(*stat),
+                        is_win: *is_win_condition,
+                    };
+                }
             }
-            self.run_mods(UpdatePoint::MainLoopHead(&mut input), &mut feedback_msgs);
 
             match self.phase {
                 // Game ended by now.
@@ -95,12 +96,10 @@ impl Game {
 
                 // Lines clearing.
                 // Move on to spawning.
-                Phase::LinesClearing {
-                    line_clears_finish_time,
-                } if line_clears_finish_time <= target_time => {
+                Phase::LinesClearing { clear_finish_time } if clear_finish_time <= target_time => {
                     self.phase =
-                        do_line_clearing(&self.config, &mut self.state, line_clears_finish_time);
-                    self.state.time = line_clears_finish_time;
+                        do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
+                    self.state.time = clear_finish_time;
 
                     // Return from update due to game end.
                     self.run_mods(UpdatePoint::LinesCleared, &mut feedback_msgs);
@@ -169,21 +168,25 @@ impl Game {
                 }
 
                 // Piece acted upon by player.
-                Phase::PieceInPlay { piece_data } if input.is_some() => {
-                    let Some(input) = input.take() else {
+                Phase::PieceInPlay { piece_data } if player_input.is_some() => {
+                    let Some(input) = player_input.take() else {
                         unreachable!()
                     };
+                    let updated_active_buttons =
+                        calc_updated_active_buttons(self.state.active_buttons, input, target_time);
+
                     self.phase = do_player_input(
                         &self.config,
                         &mut self.state,
                         piece_data,
                         input,
-                        new_state_buttons_pressed,
+                        &updated_active_buttons,
                         target_time,
                         &mut feedback_msgs,
                     );
+
                     self.state.time = target_time;
-                    self.state.buttons_pressed = new_state_buttons_pressed;
+                    self.state.active_buttons = updated_active_buttons;
 
                     self.run_mods(UpdatePoint::PiecePlayed(input), &mut feedback_msgs);
                 }
@@ -196,39 +199,21 @@ impl Game {
                     // NOTE: Ensure time is updated as requested, even when none of above cases triggered.
                     self.state.time = target_time;
 
-                    // NOTE: Ensure button state is updated as requested, even when `PieceInPlay` case is not triggered.
-                    self.state.buttons_pressed = new_state_buttons_pressed;
+                    // NOTE: Ensure buttons are still updated by inputs as requested,
+                    // even if `PieceInPlay` case is not triggered (e.g. during `LinesClearing`).
+                    if let Some(input) = player_input {
+                        self.state.active_buttons = calc_updated_active_buttons(
+                            self.state.active_buttons,
+                            input,
+                            target_time,
+                        );
+                    }
 
                     // Return from update due to target time reached.
                     return Ok(feedback_msgs);
                 }
             }
         }
-    }
-
-    /// Updates the internal `self.state.end` state, checking whether any [`Limits`] have been reached.
-    #[allow(clippy::manual_map)]
-    fn try_end_game_if_end_condition_met(&self) -> Option<Phase> {
-        // Game already ended.
-        if self.has_ended() {
-            return None;
-
-            // Not ended yet, so check whether any end conditions have been met now and return appropriate phase if yes.
-        }
-
-        self.config
-            .end_conditions
-            .iter()
-            .find_map(|&(stat, is_win_condition)| {
-                if self.check_stat_met(stat) {
-                    Some(Phase::GameEnd {
-                        cause: GameEndCause::Limit(stat),
-                        is_win: is_win_condition,
-                    })
-                } else {
-                    None
-                }
-            })
     }
 
     /// Goes through all internal 'game mods' and applies them sequentially at the given [`ModifierPoint`].
@@ -248,7 +233,10 @@ impl Game {
                 UP::PieceFell => UP::PieceFell,
                 UP::PieceLocked => UP::PieceLocked,
             };
-            feedback_msgs.push((self.state.time, Feedback::Debug(update_point)));
+            feedback_msgs.push((
+                self.state.time,
+                Feedback::Debug(format!("{update_point:?}")),
+            ));
         }
         for modifier in &mut self.modifiers {
             (modifier.mod_function)(
@@ -263,14 +251,27 @@ impl Game {
     }
 }
 
+fn calc_updated_active_buttons(
+    mut previous_active_buttons: ButtonsState,
+    input: Input,
+    input_time: InGameTime,
+) -> ButtonsState {
+    match input {
+        Input::Activate(button) => previous_active_buttons[button] = Some(input_time),
+        Input::Deactivate(button) => previous_active_buttons[button] = None,
+    }
+
+    previous_active_buttons
+}
+
 fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -> Phase {
-    let [button_ml, button_mr, button_rl, button_rr, button_ra, _ds, _dh, _td, _tl, _tr, button_h] =
+    let [active_movlf, active_movrt, active_rotlf, active_rotrt, active_rot180, _ds, _dh, _td, _tl, _tr, active_hld] =
         state
-            .buttons_pressed
+            .active_buttons
             .map(|keydowntime| keydowntime.is_some());
 
     // Take a tetromino.
-    let spawn_tet = state.piece_preview.pop_front().unwrap_or_else(|| {
+    let next_tetromino = state.piece_preview.pop_front().unwrap_or_else(|| {
         state
             .piece_generator
             .with_rng(&mut state.rng)
@@ -288,64 +289,77 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     );
 
     // "Initial Hold" system.
-    if button_h && config.allow_prespawn_actions {
-        if let Some(new_phase) = try_hold(state, spawn_tet, spawn_time) {
-            return new_phase;
+    if active_hld && config.allow_initial_actions {
+        if let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time) {
+            return next_phase;
         }
     }
 
     // Prepare data of spawned piece.
-    let raw_pos = match spawn_tet {
+    let position = match next_tetromino {
         Tetromino::O => (4, Game::LOCK_OUT_HEIGHT as isize),
         _ => (3, Game::LOCK_OUT_HEIGHT as isize),
     };
 
     // 'Raw' spawn piece, before remaining prespawn_actions are applied.
-    let raw_spawn_piece = Piece {
-        tetromino: spawn_tet,
+    let piece_v1_raw = Piece {
+        tetromino: next_tetromino,
         orientation: Orientation::N,
-        position: raw_pos,
+        position,
     };
 
     // "Initial Rotation" system.
 
     let mut turns = 0;
 
-    if button_rr {
+    if active_rotrt {
         turns += 1;
     }
-    if button_ra {
+    if active_rot180 {
         turns += 2;
     }
-    if button_rl {
+    if active_rotlf {
         turns -= 1;
     }
 
-    // Possibly; Rotation of 'raw' spawn piece.
-    let spawn_piece = if config.allow_prespawn_actions {
+    /* NOTE (FIXME?): We do not currently allow other initial actions, because
+    This forces us to impose an ordering on a set of actions which happen 'simultaneously'
+    at game instant but require sequencing nevertheless. Currently it works like this:
+    1. Raw initial spawn: Position piece.
+    2. Initial 'Hold': Short-circuit rest of spawn sequence (no further sequencing).
+    3. Initial 'Rotate': Use rotation system to change piece if possible.
+        * Note: We use proper rotation. We could also simply hardcode a unique Initial 'Orientation'.
+          But this is more flexible.
+
+    Initial systems considered:
+    * Initial 'Move': Happens before or after Rotate? Maybe depending on whether only one sequencing fails (->complexity)?
+    * Initial 'Teleport' (L/R/down): Same thing.
+    * Initial 'Drop' (soft/hard): Same thing.
+    */
+
+    // Optionally apply rotation to spawn piece.
+    let piece_v2_rot = if config.allow_initial_actions {
         config
             .rotation_system
-            .rotate(&raw_spawn_piece, &state.board, turns)
+            .rotate(&piece_v1_raw, &state.board, turns)
     } else {
-        raw_spawn_piece
-            .fits_onto(&state.board)
-            .then_some(raw_spawn_piece)
+        piece_v1_raw.fits_onto(&state.board).then_some(piece_v1_raw)
     };
 
     // Try finding `Some` valid spawn piece from the provided options in order.
-    let Some(spawn_piece) = spawn_piece else {
+    let Some(piece_v3_ready) = piece_v2_rot else {
         // Otherwise BlockOut
-        let blocked_piece = if config.allow_prespawn_actions {
+        let blocked_piece = if config.allow_initial_actions {
             match config
                 .rotation_system
-                .rotate(&raw_spawn_piece, &Board::default(), turns)
+                .rotate(&piece_v1_raw, &Board::default(), turns)
             {
                 Some(rotated_piece) => rotated_piece,
                 // This odd case happens when the rotation system does not even do rotation on an empty board.
-                None => raw_spawn_piece,
+                None => piece_v1_raw,
             }
         } else {
-            raw_spawn_piece
+            piece_v1_raw
         };
 
         return Phase::GameEnd {
@@ -355,7 +369,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     };
 
     // We're falling if piece could move down.
-    let is_fall_not_lock = spawn_piece.offset_on(&state.board, (0, -1)).is_ok();
+    let is_fall_not_lock = piece_v3_ready.offset_on(&state.board, (0, -1)).is_ok();
 
     let fall_or_lock_time = spawn_time.saturating_add(if is_fall_not_lock {
         // Fall immediately.
@@ -365,10 +379,10 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     });
 
     // Piece just spawned, lowest y = initial y.
-    let lowest_y = spawn_piece.position.1;
+    let lowest_y = piece_v3_ready.position.1;
 
     // Piece just spawned, standard full lock time max.
-    let capped_lock_time = spawn_time.saturating_add(
+    let lock_time_cap = spawn_time.saturating_add(
         state
             .lock_delay
             .mul_ennf64(config.lock_reset_cap_factor)
@@ -377,7 +391,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     // Schedule immediate move after spawning, if any move button held.
     // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
-    let auto_move_scheduled = if button_ml || button_mr {
+    let auto_move_scheduled = if active_movlf || active_movrt {
         Some(spawn_time)
     } else {
         None
@@ -385,20 +399,20 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     Phase::PieceInPlay {
         piece_data: PieceData {
-            piece: spawn_piece,
+            piece: piece_v3_ready,
             fall_or_lock_time,
             is_fall_not_lock,
             auto_move_scheduled,
             lowest_y,
-            capped_lock_time,
+            lock_time_cap,
         },
     }
 }
 
-fn do_line_clearing(
+fn do_lines_clearing(
     config: &Configuration,
     state: &mut State,
-    line_clears_finish_time: InGameTime,
+    clear_finish_time: InGameTime,
 ) -> Phase {
     for y in (0..Game::HEIGHT).rev() {
         // Full line: move it to the cleared lines storage and push an empty line to the board.
@@ -430,20 +444,20 @@ fn do_line_clearing(
     }
 
     Phase::Spawning {
-        spawn_time: line_clears_finish_time.saturating_add(config.spawn_delay),
+        spawn_time: clear_finish_time.saturating_add(config.spawn_delay),
     }
 }
 
 fn check_piece_became_movable_get_moved_piece(
-    prev_piece: Piece,
-    next_piece: Piece,
+    previous_piece: Piece,
+    updated_piece: Piece,
     board: &Board,
     dx: isize,
 ) -> Option<Piece> {
-    let moved_prev_piece = prev_piece.offset_on(board, (dx, 0));
-    let moved_next_piece = next_piece.offset_on(board, (dx, 0));
+    let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
+    let moved_updated_piece = updated_piece.offset_on(board, (dx, 0));
 
-    if let (Err(_), Ok(valid_moved_piece)) = (moved_prev_piece, moved_next_piece) {
+    if let (Err(_), Ok(valid_moved_piece)) = (moved_previous_piece, moved_updated_piece) {
         Some(valid_moved_piece)
 
     // No changes need to be made after all.
@@ -461,7 +475,7 @@ fn do_autonomous_move(
 ) -> Phase {
     // Move piece and update all appropriate piece-related values.
 
-    let mut new_piece = previous_piece_data.piece;
+    let mut updated_piece = previous_piece_data.piece;
 
     let ensure_lt_lock_delay = (config.ensure_move_delay_lt_lock_delay
         && !previous_piece_data.is_fall_not_lock)
@@ -469,14 +483,15 @@ fn do_autonomous_move(
 
     let opt_dx_and_next_move_time = calc_move_direction_and_next_move_time(
         config,
-        &state.buttons_pressed,
+        &state.active_buttons,
         auto_move_time,
         ensure_lt_lock_delay,
     );
 
-    let new_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time {
+    let updated_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time
+    {
         if let Ok(moved_piece) = previous_piece_data.piece.offset_on(&state.board, (dx, 0)) {
-            new_piece = moved_piece;
+            updated_piece = moved_piece;
             // Able to do relevant move; Insert autonomous movement.
             Some(next_move_time)
         } else {
@@ -489,12 +504,12 @@ fn do_autonomous_move(
     };
 
     // Horizontal move could not have affected height, so it stays the same!
-    let new_lowest_y = previous_piece_data.lowest_y;
-    let new_capped_lock_time = previous_piece_data.capped_lock_time;
+    let updated_lowest_y = previous_piece_data.lowest_y;
+    let updated_lock_time_cap = previous_piece_data.lock_time_cap;
 
-    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
+    let updated_is_fall_not_lock = updated_piece.offset_on(&state.board, (0, -1)).is_ok();
 
-    let new_fall_or_lock_time = if new_is_fall_not_lock {
+    let updated_fall_or_lock_time = if updated_is_fall_not_lock {
         // Calculate scheduled fall time.
         // This implements (¹).
         let was_grounded = previous_piece_data
@@ -505,7 +520,7 @@ fn do_autonomous_move(
         if was_grounded {
             // Refresh fall timer if we *started* falling.
             auto_move_time.saturating_add(
-                if state.buttons_pressed[Button::DropSoft].is_some() {
+                if state.active_buttons[Button::DropSoft].is_some() {
                     state.fall_delay.div_ennf64(config.soft_drop_divisor)
                 } else {
                     state.fall_delay
@@ -517,9 +532,9 @@ fn do_autonomous_move(
             previous_piece_data.fall_or_lock_time
         }
     } else {
-        // NOTE: capped_lock_time may actually lie in the past, so we first need to cap *it* from below (current time)!
+        // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
         auto_move_time
-            .max(new_capped_lock_time)
+            .max(updated_lock_time_cap)
             .min(auto_move_time.saturating_add(state.lock_delay.saturating_duration()))
     };
 
@@ -527,12 +542,12 @@ fn do_autonomous_move(
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece_data: PieceData {
-            piece: new_piece,
-            fall_or_lock_time: new_fall_or_lock_time,
-            is_fall_not_lock: new_is_fall_not_lock,
-            auto_move_scheduled: new_auto_move_scheduled,
-            lowest_y: new_lowest_y,
-            capped_lock_time: new_capped_lock_time,
+            piece: updated_piece,
+            fall_or_lock_time: updated_fall_or_lock_time,
+            is_fall_not_lock: updated_is_fall_not_lock,
+            auto_move_scheduled: updated_auto_move_scheduled,
+            lowest_y: updated_lowest_y,
+            lock_time_cap: updated_lock_time_cap,
         },
     }
 }
@@ -582,9 +597,9 @@ fn do_fall(
     */
 
     // Drop piece and update all appropriate piece-related values.
-    let mut new_piece = previous_piece_data.piece;
+    let mut updated_piece = previous_piece_data.piece;
     if let Ok(fallen_piece) = previous_piece_data.piece.offset_on(&state.board, (0, -1)) {
-        new_piece = fallen_piece;
+        updated_piece = fallen_piece;
     }
 
     // Move resumption.
@@ -594,22 +609,23 @@ fn do_fall(
 
     let opt_dx_and_next_move_time = calc_move_direction_and_next_move_time(
         config,
-        &state.buttons_pressed,
+        &state.active_buttons,
         fall_time,
         ensure_lt_lock_delay,
     );
 
-    let new_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time {
+    let updated_auto_move_scheduled = if let Some((dx, next_move_time)) = opt_dx_and_next_move_time
+    {
         if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
-            new_piece,
+            updated_piece,
             &state.board,
             dx,
         ) {
             // Naïvely, movement direction should be kept;
             // But due to the system mentioned in (⁴), we do need to check
             // if the piece was stuck and became unstuck, and manually do a move in this case!
-            new_piece = moved_piece;
+            updated_piece = moved_piece;
             Some(next_move_time)
         } else {
             // No changes need to be made.
@@ -620,11 +636,11 @@ fn do_fall(
         None
     };
 
-    let (new_lowest_y, new_capped_lock_time) =
-        if new_piece.position.1 < previous_piece_data.lowest_y {
-            // Refresh position and capped_lock_time.
+    let (updated_lowest_y, updated_lock_time_cap) =
+        if updated_piece.position.1 < previous_piece_data.lowest_y {
+            // Refresh position and lock_time_cap.
             (
-                new_piece.position.1,
+                updated_piece.position.1,
                 fall_time.saturating_add(
                     state
                         .lock_delay
@@ -635,15 +651,15 @@ fn do_fall(
         } else {
             (
                 previous_piece_data.lowest_y,
-                previous_piece_data.capped_lock_time,
+                previous_piece_data.lock_time_cap,
             )
         };
 
-    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
+    let updated_is_fall_not_lock = updated_piece.offset_on(&state.board, (0, -1)).is_ok();
 
-    let new_fall_or_lock_time = if new_is_fall_not_lock {
+    let updated_fall_or_lock_time = if updated_is_fall_not_lock {
         fall_time.saturating_add(
-            if state.buttons_pressed[Button::DropSoft].is_some() {
+            if state.active_buttons[Button::DropSoft].is_some() {
                 state.fall_delay.div_ennf64(config.soft_drop_divisor)
             } else {
                 state.fall_delay
@@ -651,9 +667,9 @@ fn do_fall(
             .saturating_duration(),
         )
     } else {
-        // NOTE: capped_lock_time may actually lie in the past, so we first need to cap *it* from below (current time)!
+        // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
         fall_time
-            .max(new_capped_lock_time)
+            .max(updated_lock_time_cap)
             .min(fall_time.saturating_add(state.lock_delay.saturating_duration()))
     };
 
@@ -661,12 +677,12 @@ fn do_fall(
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece_data: PieceData {
-            piece: new_piece,
-            fall_or_lock_time: new_fall_or_lock_time,
-            is_fall_not_lock: new_is_fall_not_lock,
-            auto_move_scheduled: new_auto_move_scheduled,
-            lowest_y: new_lowest_y,
-            capped_lock_time: new_capped_lock_time,
+            piece: updated_piece,
+            fall_or_lock_time: updated_fall_or_lock_time,
+            is_fall_not_lock: updated_is_fall_not_lock,
+            auto_move_scheduled: updated_auto_move_scheduled,
+            lowest_y: updated_lowest_y,
+            lock_time_cap: updated_lock_time_cap,
         },
     }
 }
@@ -676,7 +692,7 @@ fn do_player_input(
     state: &mut State,
     previous_piece_data: PieceData,
     input: Input,
-    new_state_buttons_pressed: [Option<InGameTime>; Button::VARIANTS.len()],
+    updated_active_buttons: &ButtonsState,
     input_time: InGameTime,
     feedback_msgs: &mut Vec<FeedbackMsg>,
 ) -> Phase {
@@ -744,29 +760,29 @@ fn do_player_input(
       to the right.
 
     [⁵] Table: "Karnaugh map".
-    +-----------+----------------------------------------------+
-    |           |     Deact_l   Deact_r   Actv_R    Actv_L     |
-    + Old state +----------------------------------------------+
-    |           |                                              |
-    |   l  r    |      l  r      l  r      l  R      L  r      |
-    |   ·  ·    |      ·  ·      ·  ·      · +→ˢ     ←+ ·ˢ     |
-    |           |                                              |
-    |   L  r    |      l  r      L  r      L  R      L  r      |
-    |   ←  ·    |      ←- ·ᶜ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
-    |           |                                              |
-    |   L> R    |      l  R      L  r      L  R      L  R      |
-    |   ←  ·    |      ←-+→ˢ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
-    |           |                                              |
-    |   L==R    |      l  R      L  r      L  R      L  R      |
-    |   ·  ·    |      · +→ˢ     ←+ ·ˢ     · +→ˢ     ←+ ·ˢ     |
-    |           |                                              |
-    |   L <R    |      l  R      L  r      L  R      L  R      |
-    |   ·  →    |      ·  →      ←+-→ˢ     · +→ˢ     ←+-→ˢ     |
-    |           |                                              |
-    |   l  R    |      l  R      l  r      l  R      L  R      |
-    |   ·  →    |      ·  →      · -→ᶜ     · +→ˢ     ←+-→ˢ     |
-    |           |                                              |
-    +-----------+----------------------------------------------+
+    +------------+----------------------------------------------+
+    |            |     Deact_l   Deact_r   Actv_R    Actv_L     |
+    + Prev.state +----------------------------------------------+
+    |            |                                              |
+    |    l  r    |      l  r      l  r      l  R      L  r      |
+    |    ·  ·    |      ·  ·      ·  ·      · +→ˢ     ←+ ·ˢ     |
+    |            |                                              |
+    |    L  r    |      l  r      L  r      L  R      L  r      |
+    |    ←  ·    |      ←- ·ᶜ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
+    |            |                                              |
+    |    L> R    |      l  R      L  r      L  R      L  R      |
+    |    ←  ·    |      ←-+→ˢ     ←  ·      ←-+→ˢ     ←+ ·ˢ     |
+    |            |                                              |
+    |    L==R    |      l  R      L  r      L  R      L  R      |
+    |    ·  ·    |      · +→ˢ     ←+ ·ˢ     · +→ˢ     ←+ ·ˢ     |
+    |            |                                              |
+    |    L <R    |      l  R      L  r      L  R      L  R      |
+    |    ·  →    |      ·  →      ←+-→ˢ     · +→ˢ     ←+-→ˢ     |
+    |            |                                              |
+    |    l  R    |      l  R      l  r      l  R      L  R      |
+    |    ·  →    |      ·  →      · -→ᶜ     · +→ˢ     ←+-→ˢ     |
+    |            |                                              |
+    +------------+----------------------------------------------+
 
     The table has nontrivial complexity but from it we can derive expressions to
     for the things we actually care about (convention: `lrLR` refer to old state):
@@ -790,15 +806,15 @@ fn do_player_input(
     // Prepare to maybe change the move_scheduled.
     let mut computed_move_input_data: Option<(bool, bool)> = None;
 
-    let mut new_piece = previous_piece_data.piece;
+    let mut updated_piece = previous_piece_data.piece;
     use {Button as B, Input as I};
     match input {
         // Hold.
         // - If succeeds, changes game action state to spawn different piece.
         // - Otherwise does nothing.
         I::Activate(B::HoldPiece) => {
-            if let Some(new_phase) = try_hold(state, new_piece.tetromino, input_time) {
-                return new_phase;
+            if let Some(next_phase) = try_do_hold(state, updated_piece.tetromino, input_time) {
+                return next_phase;
             }
         }
 
@@ -812,7 +828,7 @@ fn do_player_input(
                 _ => unreachable!(),
             };
 
-            new_piece = new_piece.teleported(&state.board, offset);
+            updated_piece = updated_piece.teleported(&state.board, offset);
         }
 
         // Rotates.
@@ -828,9 +844,9 @@ fn do_player_input(
             if let Some(rotated_piece) =
                 config
                     .rotation_system
-                    .rotate(&new_piece, &state.board, right_turns)
+                    .rotate(&updated_piece, &state.board, right_turns)
             {
-                new_piece = rotated_piece;
+                updated_piece = rotated_piece;
             }
         }
 
@@ -838,14 +854,14 @@ fn do_player_input(
         // Instantly try to move piece all the way down.
         // The locking is handled as part of a different check/system further.
         I::Activate(B::DropHard) => {
-            new_piece = new_piece.teleported(&state.board, (0, -1));
+            updated_piece = updated_piece.teleported(&state.board, (0, -1));
 
             if config.feedback_verbosity != FeedbackVerbosity::Silent {
                 feedback_msgs.push((
                     input_time,
                     Feedback::HardDrop {
-                        old_piece: previous_piece_data.piece,
-                        new_piece,
+                        previous_piece: previous_piece_data.piece,
+                        updated_piece,
                     },
                 ));
             }
@@ -855,16 +871,16 @@ fn do_player_input(
         // Instantly try to move piece one tile down.
         // The locking is handled as part of a different check/system further.
         I::Activate(B::DropSoft) => {
-            if let Ok(fallen_piece) = new_piece.offset_on(&state.board, (0, -1)) {
-                new_piece = fallen_piece;
+            if let Ok(fallen_piece) = updated_piece.offset_on(&state.board, (0, -1)) {
+                updated_piece = fallen_piece;
             }
         }
 
         // Movement.
         // This is relatively very complicated; The logic is based on the comment in (³).
         I::Activate(B::MoveLeft | B::MoveRight) | I::Deactivate(B::MoveLeft | B::MoveRight) => {
-            let prev_l = state.buttons_pressed[B::MoveLeft];
-            let prev_r = state.buttons_pressed[B::MoveRight];
+            let prev_l = state.active_buttons[B::MoveLeft];
+            let prev_r = state.active_buttons[B::MoveRight];
             let (l, r) = (prev_l.is_some(), prev_r.is_some());
 
             // *Setting auto-move time* (alt): !(Deact_L !L>=R || Deact_R !L=<R)
@@ -904,13 +920,13 @@ fn do_player_input(
     // Update movetimer and rest of movement stuff.
     // See also (³).
 
-    let new_auto_move_scheduled = 'exp: {
+    let updated_auto_move_scheduled = 'exp: {
         let ensure_lt_lock_delay = (config.ensure_move_delay_lt_lock_delay
             && !previous_piece_data.is_fall_not_lock)
             .then_some(state.lock_delay);
         let Some((dx, next_move_time)) = calc_move_direction_and_next_move_time(
             config,
-            &new_state_buttons_pressed,
+            updated_active_buttons,
             input_time,
             ensure_lt_lock_delay,
         ) else {
@@ -921,8 +937,8 @@ fn do_player_input(
         // Handle case where movement input was activated.
         if let Some((initiate_mvmt, cancel_mvmt)) = computed_move_input_data {
             break 'exp if initiate_mvmt {
-                if let Ok(moved_piece) = new_piece.offset_on(&state.board, (dx, 0)) {
-                    new_piece = moved_piece;
+                if let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) {
+                    updated_piece = moved_piece;
                     // Able to do relevant move; Set autonomous movement.
                     Some(next_move_time)
                 } else {
@@ -942,12 +958,12 @@ fn do_player_input(
         // if the piece was stuck and became unstuck, and manually do a move in this case!
         if let Some(moved_piece) = check_piece_became_movable_get_moved_piece(
             previous_piece_data.piece,
-            new_piece,
+            updated_piece,
             &state.board,
             dx,
         ) {
             // (Also note: We use `(dx, next_move_time)` as computed from the *new* button state - but should not change, since this route is only triggered if the piece is able to move again and NOT because of a player move (`maybe_override_auto_move` is `None`).)
-            new_piece = moved_piece;
+            updated_piece = moved_piece;
             break 'exp Some(next_move_time);
         }
 
@@ -956,12 +972,12 @@ fn do_player_input(
         previous_piece_data.auto_move_scheduled
     };
 
-    // Update `lowest_y`, re-set `capped_lock_time` if applicable.
-    let (new_lowest_y, new_capped_lock_time) =
-        if new_piece.position.1 < previous_piece_data.lowest_y {
-            // Refresh position and capped_lock_time.
+    // Update `lowest_y`, re-set `lock_time_cap` if applicable.
+    let (updated_lowest_y, updated_lock_time_cap) =
+        if updated_piece.position.1 < previous_piece_data.lowest_y {
+            // Refresh position and lock_time_cap.
             (
-                new_piece.position.1,
+                updated_piece.position.1,
                 input_time.saturating_add(
                     state
                         .lock_delay
@@ -972,13 +988,12 @@ fn do_player_input(
         } else {
             (
                 previous_piece_data.lowest_y,
-                previous_piece_data.capped_lock_time,
+                previous_piece_data.lock_time_cap,
             )
         };
 
     // Update `is_fall_not_lock`, i.e., whether we are falling (otherwise locking) now.
-    // `new_is_fall_not_lock` is needed below.
-    let new_is_fall_not_lock = new_piece.offset_on(&state.board, (0, -1)).is_ok();
+    let updated_is_fall_not_lock = updated_piece.offset_on(&state.board, (0, -1)).is_ok();
 
     let was_grounded = previous_piece_data
         .piece
@@ -987,7 +1002,7 @@ fn do_player_input(
 
     // Update falltimer and locktimer.
     // See also (¹) and (²).
-    let new_fall_or_lock_time = if new_is_fall_not_lock {
+    let updated_fall_or_lock_time = if updated_is_fall_not_lock {
         // Calculate scheduled fall time.
         // This implements (¹).
         let fall_reset =
@@ -995,7 +1010,7 @@ fn do_player_input(
         if fall_reset {
             // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.
             input_time.saturating_add(
-                if new_state_buttons_pressed[Button::DropSoft].is_some() {
+                if updated_active_buttons[Button::DropSoft].is_some() {
                     state.fall_delay.div_ennf64(config.soft_drop_divisor)
                 } else {
                     state.fall_delay
@@ -1011,8 +1026,8 @@ fn do_player_input(
         // This implements (²).
         let lock_immediately = matches!(input, I::Activate(B::DropHard))
             || (was_grounded && matches!(input, I::Activate(B::DropSoft)));
-        let lock_reset_piecechange = new_piece != previous_piece_data.piece;
-        let lock_reset_lenience = config.lenient_lock_delay_reset
+        let lock_reset_piecechange = updated_piece != previous_piece_data.piece;
+        let lock_reset_lenience = config.allow_lenient_lock_reset
             && matches!(
                 input,
                 I::Activate(
@@ -1032,9 +1047,9 @@ fn do_player_input(
             input_time
         } else if lock_reset_lenience || lock_reset_piecechange {
             // On the ground - Refresh lock time if piece moved.
-            // NOTE: capped_lock_time may actually lie in the past, so we first need to cap *it* from below (current time)!
+            // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
             input_time
-                .max(new_capped_lock_time)
+                .max(updated_lock_time_cap)
                 .min(input_time.saturating_add(state.lock_delay.saturating_duration()))
         } else {
             // Previous lock time.
@@ -1046,20 +1061,20 @@ fn do_player_input(
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece_data: PieceData {
-            piece: new_piece,
-            fall_or_lock_time: new_fall_or_lock_time,
-            is_fall_not_lock: new_is_fall_not_lock,
-            auto_move_scheduled: new_auto_move_scheduled,
-            lowest_y: new_lowest_y,
-            capped_lock_time: new_capped_lock_time,
+            piece: updated_piece,
+            fall_or_lock_time: updated_fall_or_lock_time,
+            is_fall_not_lock: updated_is_fall_not_lock,
+            auto_move_scheduled: updated_auto_move_scheduled,
+            lowest_y: updated_lowest_y,
+            lock_time_cap: updated_lock_time_cap,
         },
     }
 }
 
-fn try_hold(
+fn try_do_hold(
     state: &mut State,
     tetromino: Tetromino,
-    new_piece_spawn_time: InGameTime,
+    next_spawn_time: InGameTime,
 ) -> Option<Phase> {
     match state.piece_held {
         // Nothing held yet, just hold spawned tetromino.
@@ -1067,7 +1082,7 @@ fn try_hold(
             state.piece_held = Some((tetromino, false));
             // Issue a spawn.
             Some(Phase::Spawning {
-                spawn_time: new_piece_spawn_time,
+                spawn_time: next_spawn_time,
             })
         }
         // Swap spawned tetromino, push held back into next pieces queue.
@@ -1077,7 +1092,7 @@ fn try_hold(
             state.piece_preview.push_front(held_tet);
             // Issue a spawn.
             Some(Phase::Spawning {
-                spawn_time: new_piece_spawn_time,
+                spawn_time: next_spawn_time,
             })
         }
         // Else can't hold, don't do anything.
@@ -1199,7 +1214,7 @@ fn do_lock(
     } else {
         // Lines cleared, enter line clearing state.
         Phase::LinesClearing {
-            line_clears_finish_time: lock_time.saturating_add(config.line_clear_duration),
+            clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
         }
     }
 }
@@ -1210,13 +1225,13 @@ fn do_lock(
 /// * No direction is pressed.
 fn calc_move_direction_and_next_move_time(
     config: &Configuration,
-    button_state: &[Option<InGameTime>; Button::VARIANTS.len()],
+    active_buttons: &[Option<InGameTime>; Button::VARIANTS.len()],
     move_time: InGameTime,
     ensure_lt_lock_delay: Option<ExtDuration>,
 ) -> Option<(isize, InGameTime)> {
     let (dx, how_long_relevant_direction_pressed) = match (
-        button_state[Button::MoveLeft],
-        button_state[Button::MoveRight],
+        active_buttons[Button::MoveLeft],
+        active_buttons[Button::MoveRight],
     ) {
         (Some(time_actvd_left), Some(time_actvd_right)) => {
             match time_actvd_left.cmp(&time_actvd_right) {

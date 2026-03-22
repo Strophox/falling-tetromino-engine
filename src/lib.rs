@@ -39,9 +39,9 @@ let State { board, .. } = game.state();
 mod builder;
 pub mod extduration;
 pub mod extnonnegf64;
-mod game_update;
 pub mod randomization;
 pub mod rotation;
+mod update;
 
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
 

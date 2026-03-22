@@ -428,242 +428,6 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     }
 }
 
-fn try_do_hold(
-    state: &mut State,
-    tetromino: Tetromino,
-    next_spawn_time: InGameTime,
-) -> Option<Phase> {
-    match state.piece_held {
-        // Nothing held yet, just hold spawned tetromino.
-        None => {
-            state.piece_held = Some((tetromino, false));
-            // Issue a spawn.
-            Some(Phase::Spawning {
-                spawn_time: next_spawn_time,
-            })
-        }
-        // Swap spawned tetromino, push held back into next pieces queue.
-        Some((held_tet, true)) => {
-            state.piece_held = Some((tetromino, false));
-            // Cause the next spawn to specially be the piece we held.
-            state.piece_preview.push_front(held_tet);
-            // Issue a spawn.
-            Some(Phase::Spawning {
-                spawn_time: next_spawn_time,
-            })
-        }
-        // Else can't hold, don't do anything.
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn do_autonomous_move(
-    config: &Configuration,
-    state: &mut State,
-    previous_piece: Piece,
-    auto_move_time: InGameTime,
-    previous_fall_or_lock_time: InGameTime,
-    previous_lock_time_cap: InGameTime,
-    previous_lowest_y: isize,
-) -> Phase {
-    // Move piece and update all appropriate piece-related values.
-
-    let (updated_piece, updated_is_airborne, updated_auto_move_scheduled) = 'exp: {
-        let Some((move_is_left, dir_active_since)) =
-            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
-        else {
-            // No sensible movement information received.
-            break 'exp (
-                previous_piece,
-                previous_piece.is_airborne(&state.board),
-                None,
-            );
-        };
-
-        let dx = if move_is_left { -1 } else { 1 };
-        if let Ok(moved_piece) = previous_piece.offset_on(&state.board, (dx, 0)) {
-            let updated_piece = moved_piece;
-            // Able to do relevant move; Insert autonomous movement.
-            let is_airborne = updated_piece.is_airborne(&state.board);
-            let auto_move_time = calc_auto_move_time(
-                config,
-                state,
-                auto_move_time,
-                dir_active_since,
-                !is_airborne,
-            );
-
-            break 'exp (updated_piece, is_airborne, Some(auto_move_time));
-        }
-
-        // Unable to move; Remove autonomous movement.
-        (
-            previous_piece,
-            previous_piece.is_airborne(&state.board),
-            None,
-        )
-    };
-
-    // Horizontal move could not have affected height, so it stays the same!
-    let updated_lowest_y = previous_lowest_y;
-    let updated_lock_time_cap = previous_lock_time_cap;
-
-    let updated_fall_or_lock_time = if updated_is_airborne {
-        // Calculate scheduled fall time. See (¹).
-        let was_grounded = !previous_piece.is_airborne(&state.board);
-
-        if was_grounded {
-            // Refresh fall timer if we *started* falling.
-            auto_move_time.saturating_add(
-                if state.active_buttons[Button::DropSoft].is_some() {
-                    state.fall_delay.div_ennf64(config.soft_drop_factor)
-                } else {
-                    state.fall_delay
-                }
-                .saturating_duration(),
-            )
-        } else {
-            // Falling as before.
-            previous_fall_or_lock_time
-        }
-    } else {
-        // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
-        auto_move_time
-            .max(updated_lock_time_cap)
-            .min(auto_move_time.saturating_add(state.lock_delay.saturating_duration()))
-    };
-
-    // Update 'ActionState';
-    // Return it to the main state machine with the latest acquired piece data.
-    Phase::PieceInPlay {
-        piece: updated_piece,
-        auto_move_scheduled: updated_auto_move_scheduled,
-        fall_or_lock_time: updated_fall_or_lock_time,
-        lock_time_cap: updated_lock_time_cap,
-        lowest_y: updated_lowest_y,
-    }
-}
-
-fn do_fall(
-    config: &Configuration,
-    state: &mut State,
-    previous_piece: Piece,
-    previous_auto_move_scheduled: Option<InGameTime>,
-    fall_time: InGameTime,
-    previous_lock_time_cap: InGameTime,
-    previous_lowest_y: isize,
-) -> Phase {
-    /*
-    # Overview
-
-    The complexity of various subparts in this function are ranked roughly:
-       1. Falling - due to how it is sometimes falling *and* moving *and then* updating falling/locking info.
-       2. Moving - due to how it is mostly a single movement + updating falling/locking info.
-       3. Locking - due to how simple it is if it happens.
-
-    # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
-
-    ## Falling
-
-    The fall timer is influenced as follows¹:
-    - immediate fall + refreshed falltimer  if  fell
-    - refreshed falltimer  if  (grounded ~> airborne)ᵃ
-    - [old falltimer  if  not in above cases]
-
-    ## Locking
-
-    The lock timer is influenced as follows²:
-    - immediate lock  if  locked
-    - refreshed locktimer  if  (airborne ~> grounded)ᵇ
-    - [old locktimer  if  not in above cases]
-
-    ## Moving
-
-    The move timer is influenced as follows³:
-    - immediate move + some refreshed movetimer  if  moved
-    - no movetimer  if  move not possible
-    - [old movetimer  if  not in above cases]
-
-    ### Move Resumption
-
-    We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
-    the piece should move immediately as soon as it is unstuck⁴ (e.g. once fallen below the obstruction).
-    However, it has to be computed after another event has been handled that may be cause of unobstruction.
-    */
-
-    // Drop piece and update all appropriate piece-related values.
-    let updated_piece = if let Ok(fallen_piece) = previous_piece.offset_on(&state.board, (0, -1)) {
-        fallen_piece
-    } else {
-        // Piece could not fall. Return previous.
-        previous_piece
-    };
-
-    let (updated_lowest_y, updated_lock_time_cap) = if updated_piece.position.1 < previous_lowest_y
-    {
-        // Refresh position and lock_time_cap.
-        (
-            updated_piece.position.1,
-            fall_time.saturating_add(
-                state
-                    .lock_delay
-                    .mul_ennf64(config.lock_reset_cap_factor)
-                    .saturating_duration(),
-            ),
-        )
-    } else {
-        (previous_lowest_y, previous_lock_time_cap)
-    };
-
-    let updated_is_airborne = updated_piece.is_airborne(&state.board);
-
-    let updated_fall_or_lock_time = if updated_is_airborne {
-        fall_time.saturating_add(
-            if state.active_buttons[Button::DropSoft].is_some() {
-                state.fall_delay.div_ennf64(config.soft_drop_factor)
-            } else {
-                state.fall_delay
-            }
-            .saturating_duration(),
-        )
-    } else {
-        // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
-        fall_time
-            .max(updated_lock_time_cap)
-            .min(fall_time.saturating_add(state.lock_delay.saturating_duration()))
-    };
-
-    let updated_auto_move_scheduled = 'exp: {
-        let Some((is_moving_left, _dir_active_since)) =
-            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
-        else {
-            // No sensible movement information received.
-            break 'exp None;
-        };
-
-        let dx = if is_moving_left { -1 } else { 1 };
-        if calc_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
-            // Due to the system mentioned in (⁴), we check
-            // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
-            break 'exp Some(fall_time);
-        }
-
-        // No changes need to be made.
-        previous_auto_move_scheduled
-    };
-
-    // 'Update' ActionState;
-    // Return it to the main state machine with the latest acquired piece data.
-    Phase::PieceInPlay {
-        piece: updated_piece,
-        auto_move_scheduled: updated_auto_move_scheduled,
-        fall_or_lock_time: updated_fall_or_lock_time,
-        lock_time_cap: updated_lock_time_cap,
-        lowest_y: updated_lowest_y,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn do_player_input(
     config: &Configuration,
@@ -1023,6 +787,242 @@ fn do_player_input(
             // Previous lock time.
             previous_fall_or_lock_time
         }
+    };
+
+    // 'Update' ActionState;
+    // Return it to the main state machine with the latest acquired piece data.
+    Phase::PieceInPlay {
+        piece: updated_piece,
+        auto_move_scheduled: updated_auto_move_scheduled,
+        fall_or_lock_time: updated_fall_or_lock_time,
+        lock_time_cap: updated_lock_time_cap,
+        lowest_y: updated_lowest_y,
+    }
+}
+
+fn try_do_hold(
+    state: &mut State,
+    tetromino: Tetromino,
+    next_spawn_time: InGameTime,
+) -> Option<Phase> {
+    match state.piece_held {
+        // Nothing held yet, just hold spawned tetromino.
+        None => {
+            state.piece_held = Some((tetromino, false));
+            // Issue a spawn.
+            Some(Phase::Spawning {
+                spawn_time: next_spawn_time,
+            })
+        }
+        // Swap spawned tetromino, push held back into next pieces queue.
+        Some((held_tet, true)) => {
+            state.piece_held = Some((tetromino, false));
+            // Cause the next spawn to specially be the piece we held.
+            state.piece_preview.push_front(held_tet);
+            // Issue a spawn.
+            Some(Phase::Spawning {
+                spawn_time: next_spawn_time,
+            })
+        }
+        // Else can't hold, don't do anything.
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn do_autonomous_move(
+    config: &Configuration,
+    state: &mut State,
+    previous_piece: Piece,
+    auto_move_time: InGameTime,
+    previous_fall_or_lock_time: InGameTime,
+    previous_lock_time_cap: InGameTime,
+    previous_lowest_y: isize,
+) -> Phase {
+    // Move piece and update all appropriate piece-related values.
+
+    let (updated_piece, updated_is_airborne, updated_auto_move_scheduled) = 'exp: {
+        let Some((move_is_left, dir_active_since)) =
+            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
+        else {
+            // No sensible movement information received.
+            break 'exp (
+                previous_piece,
+                previous_piece.is_airborne(&state.board),
+                None,
+            );
+        };
+
+        let dx = if move_is_left { -1 } else { 1 };
+        if let Ok(moved_piece) = previous_piece.offset_on(&state.board, (dx, 0)) {
+            let updated_piece = moved_piece;
+            // Able to do relevant move; Insert autonomous movement.
+            let is_airborne = updated_piece.is_airborne(&state.board);
+            let auto_move_time = calc_auto_move_time(
+                config,
+                state,
+                auto_move_time,
+                dir_active_since,
+                !is_airborne,
+            );
+
+            break 'exp (updated_piece, is_airborne, Some(auto_move_time));
+        }
+
+        // Unable to move; Remove autonomous movement.
+        (
+            previous_piece,
+            previous_piece.is_airborne(&state.board),
+            None,
+        )
+    };
+
+    // Horizontal move could not have affected height, so it stays the same!
+    let updated_lowest_y = previous_lowest_y;
+    let updated_lock_time_cap = previous_lock_time_cap;
+
+    let updated_fall_or_lock_time = if updated_is_airborne {
+        // Calculate scheduled fall time. See (¹).
+        let was_grounded = !previous_piece.is_airborne(&state.board);
+
+        if was_grounded {
+            // Refresh fall timer if we *started* falling.
+            auto_move_time.saturating_add(
+                if state.active_buttons[Button::DropSoft].is_some() {
+                    state.fall_delay.div_ennf64(config.soft_drop_factor)
+                } else {
+                    state.fall_delay
+                }
+                .saturating_duration(),
+            )
+        } else {
+            // Falling as before.
+            previous_fall_or_lock_time
+        }
+    } else {
+        // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
+        auto_move_time
+            .max(updated_lock_time_cap)
+            .min(auto_move_time.saturating_add(state.lock_delay.saturating_duration()))
+    };
+
+    // Update 'ActionState';
+    // Return it to the main state machine with the latest acquired piece data.
+    Phase::PieceInPlay {
+        piece: updated_piece,
+        auto_move_scheduled: updated_auto_move_scheduled,
+        fall_or_lock_time: updated_fall_or_lock_time,
+        lock_time_cap: updated_lock_time_cap,
+        lowest_y: updated_lowest_y,
+    }
+}
+
+fn do_fall(
+    config: &Configuration,
+    state: &mut State,
+    previous_piece: Piece,
+    previous_auto_move_scheduled: Option<InGameTime>,
+    fall_time: InGameTime,
+    previous_lock_time_cap: InGameTime,
+    previous_lowest_y: isize,
+) -> Phase {
+    /*
+    # Overview
+
+    The complexity of various subparts in this function are ranked roughly:
+       1. Falling - due to how it is sometimes falling *and* moving *and then* updating falling/locking info.
+       2. Moving - due to how it is mostly a single movement + updating falling/locking info.
+       3. Locking - due to how simple it is if it happens.
+
+    # Analysis of nontrivial autonomous-event updates (`PieceData.fall_or_lock_time`, `PieceData.move_scheduled`).
+
+    ## Falling
+
+    The fall timer is influenced as follows¹:
+    - immediate fall + refreshed falltimer  if  fell
+    - refreshed falltimer  if  (grounded ~> airborne)ᵃ
+    - [old falltimer  if  not in above cases]
+
+    ## Locking
+
+    The lock timer is influenced as follows²:
+    - immediate lock  if  locked
+    - refreshed locktimer  if  (airborne ~> grounded)ᵇ
+    - [old locktimer  if  not in above cases]
+
+    ## Moving
+
+    The move timer is influenced as follows³:
+    - immediate move + some refreshed movetimer  if  moved
+    - no movetimer  if  move not possible
+    - [old movetimer  if  not in above cases]
+
+    ### Move Resumption
+
+    We *also* want to allow a player to hold 'move' while a piece is stuck, in a way where
+    the piece should move immediately as soon as it is unstuck⁴ (e.g. once fallen below the obstruction).
+    However, it has to be computed after another event has been handled that may be cause of unobstruction.
+    */
+
+    // Drop piece and update all appropriate piece-related values.
+    let updated_piece = if let Ok(fallen_piece) = previous_piece.offset_on(&state.board, (0, -1)) {
+        fallen_piece
+    } else {
+        // Piece could not fall. Return previous.
+        previous_piece
+    };
+
+    let (updated_lowest_y, updated_lock_time_cap) = if updated_piece.position.1 < previous_lowest_y
+    {
+        // Refresh position and lock_time_cap.
+        (
+            updated_piece.position.1,
+            fall_time.saturating_add(
+                state
+                    .lock_delay
+                    .mul_ennf64(config.lock_reset_cap_factor)
+                    .saturating_duration(),
+            ),
+        )
+    } else {
+        (previous_lowest_y, previous_lock_time_cap)
+    };
+
+    let updated_is_airborne = updated_piece.is_airborne(&state.board);
+
+    let updated_fall_or_lock_time = if updated_is_airborne {
+        fall_time.saturating_add(
+            if state.active_buttons[Button::DropSoft].is_some() {
+                state.fall_delay.div_ennf64(config.soft_drop_factor)
+            } else {
+                state.fall_delay
+            }
+            .saturating_duration(),
+        )
+    } else {
+        // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
+        fall_time
+            .max(updated_lock_time_cap)
+            .min(fall_time.saturating_add(state.lock_delay.saturating_duration()))
+    };
+
+    let updated_auto_move_scheduled = 'exp: {
+        let Some((is_moving_left, _dir_active_since)) =
+            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
+        else {
+            // No sensible movement information received.
+            break 'exp None;
+        };
+
+        let dx = if is_moving_left { -1 } else { 1 };
+        if calc_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
+            // Due to the system mentioned in (⁴), we check
+            // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
+            break 'exp Some(fall_time);
+        }
+
+        // No changes need to be made.
+        previous_auto_move_scheduled
     };
 
     // 'Update' ActionState;

@@ -87,20 +87,22 @@ Internally, the game keeps its own timeline:
 
 Much of the implementation is tightly encoded into types.
 
-It may be instructive just to consider the main type definitions as an overview:
-
 ```rust
 // The central engine type.
 struct Game {
     config: Configuration, // Can be safely modified during play.
-    state_init: StateInitialization,
+    state_init: StateInitialization, // For reproducibility.
     state: State,
-    phase: Phase,
-    modifiers: Vec<Modifier>, // Arbitrary compile-time mods by user.
+    phase: Phase, // Macro-state-machine.
+    modifiers: Vec<Modifier>, // Modding facility.
 }
+```
 
-// Fields:
+It may be instructive to simply consider the main type definitions as a tentative overview of the deeper engine mechanics.
 
+### Types used as `Game` fields
+
+```rust
 struct Configuration {
     piece_preview_count: usize,
     allow_initial_actions: bool,
@@ -144,8 +146,14 @@ struct State {
 
 enum Phase {
     Spawning { spawn_time: InGameTime },
-    PieceInPlay { piece_data: PieceData },
-    LinesClearing { line_clears_finish_time: InGameTime },
+    PieceInPlay {
+        piece: Piece,
+        auto_move_scheduled: Option<InGameTime>,
+        fall_or_lock_time: InGameTime,
+        lock_time_cap: InGameTime,
+        lowest_y: isize,
+    },
+    LinesClearing { clears_finish_time: InGameTime },
     GameEnd { cause: GameEndCause, is_win: bool },
 }
 
@@ -155,17 +163,9 @@ struct Modifier {
 }
 ```
 
+### Other Important Types
+
 ```rust
-// Small SELECTION of smaller types:
-
-enum Button {
-    MoveLeft, MoveRight,
-    RotateLeft, RotateRight, Rotate180,
-    DropSoft, DropHard,
-    TeleLeft, TeleRight, TeleDown, 
-    HoldPiece,
-}
-
 enum Tetromino {
     O, I, S, Z, T, L, J
 }
@@ -176,6 +176,13 @@ struct Piece {
     position: Coord,
 }
 
+enum Button {
+    MoveLeft, MoveRight,
+    RotateLeft, RotateRight, Rotate180,
+    DropSoft, DropHard,
+    TeleLeft, TeleRight, TeleDown, 
+    HoldPiece,
+}
 
 struct DelayParameters {
     base_delay: ExtDuration,
@@ -183,15 +190,6 @@ struct DelayParameters {
     subtrahend: ExtDuration,
     lowerbound: ExtDuration,
 }
-
-type GameModFn = dyn FnMut(
-    &mut UpdatePoint<&mut Option<ButtonChange>>,
-    &mut Configuration,
-    &StateInitialization,
-    &mut State,
-    &mut Phase,
-    &mut Vec<FeedbackMsg>,
-);
 ```
 
 See [full documentation](https://docs.rs/falling-tetromino-engine).

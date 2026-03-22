@@ -36,22 +36,22 @@ let State { board, .. } = game.state();
 
 #![warn(missing_docs)]
 
+mod builder;
 pub mod extduration;
 pub mod extnonnegf64;
-mod game_builder;
 mod game_update;
-pub mod rotation_system;
-pub mod tetromino_generator;
+pub mod randomization;
+pub mod rotation;
 
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
 
-use rand_chacha::{rand_core::SeedableRng, ChaCha12Rng};
+use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
 
+pub use builder::GameBuilder;
 pub use extduration::ExtDuration;
 pub use extnonnegf64::ExtNonNegF64;
-pub use game_builder::GameBuilder;
-pub use rotation_system::RotationSystem;
-pub use tetromino_generator::TetrominoGenerator;
+pub use randomization::TetrominoGenerator;
+pub use rotation::RotationSystem;
 
 /// Abstract identifier for which type of tile occupies a cell in the grid.
 pub type TileTypeID = NonZeroU8;
@@ -72,7 +72,7 @@ pub type ButtonsState = [Option<InGameTime>; Button::VARIANTS.len()];
 /// The type used to identify points in time in a game's internal timeline.
 pub type InGameTime = Duration;
 /// The internal RNG used by a game.
-pub type GameRng = ChaCha12Rng;
+pub type GameRng = ChaCha8Rng;
 /// Type of underlying functions at the heart of a [`Modifier`].
 pub type GameModFn = dyn FnMut(
     &mut UpdatePoint<&mut Option<Input>>,
@@ -415,24 +415,6 @@ pub enum GameEndCause {
     Custom(String),
 }
 
-/// Locking details stored about an active piece in play.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PieceData {
-    /// The tetromino game piece itself.
-    pub piece: Piece,
-    /// The time of the next fall or lock event.
-    pub fall_or_lock_time: InGameTime,
-    /// Whether `fall_or_lock_time` refers to a fall or lock event.
-    pub is_fall_not_lock: bool,
-    /// The lowest recorded vertical position of the main piece.
-    pub lowest_y: isize,
-    /// The time after which the active piece will immediately lock upon touching ground.
-    pub lock_time_cap: InGameTime,
-    /// Optional time of the next move event.
-    pub auto_move_scheduled: Option<InGameTime>,
-}
-
 /// An event that is scheduled by the game engine to execute some action.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -445,8 +427,16 @@ pub enum Phase {
     },
     /// The state of the game having an active piece in-play, which can be controlled by a player.
     PieceInPlay {
-        /// The data required to play a piece in this `Phase.`
-        piece_data: PieceData,
+        /// The tetromino game piece itself.
+        piece: Piece,
+        /// Optional time of the next move event.
+        auto_move_scheduled: Option<InGameTime>,
+        /// The time of the next fall or lock event.
+        fall_or_lock_time: InGameTime,
+        /// The time after which the active piece will immediately lock upon touching ground.
+        lock_time_cap: InGameTime,
+        /// The lowest recorded vertical position of the main piece.
+        lowest_y: isize,
     },
     /// The state of the game "taking its time" to clear out lines.
     /// In this state the board is as it was at the time of the piece locking down,
@@ -765,6 +755,11 @@ impl Piece {
         }
     }
 
+    /// Check whether piece could fall one unit down or not.
+    pub fn is_airborne(&self, board: &Board) -> bool {
+        self.offset_on(board, (0, -1)).is_ok()
+    }
+
     /// Given an iterator over some offsets, checks whether the rotated piece fits at any offset
     /// location onto the board.
     pub fn find_reoriented_offset_on(
@@ -1052,11 +1047,7 @@ impl Default for Configuration {
 impl Phase {
     /// Read accessor to a `Phase`'s possible [`Piece`].
     pub fn piece(&self) -> Option<&Piece> {
-        if let Phase::PieceInPlay {
-            piece_data: PieceData { piece, .. },
-            ..
-        } = self
-        {
+        if let Phase::PieceInPlay { piece, .. } = self {
             Some(piece)
         } else {
             None
@@ -1065,11 +1056,7 @@ impl Phase {
 
     /// Mutable accessor to a `Phase`'s possible [`Piece`].
     pub fn piece_mut(&mut self) -> Option<&mut Piece> {
-        if let Phase::PieceInPlay {
-            piece_data: PieceData { piece, .. },
-            ..
-        } = self
-        {
+        if let Phase::PieceInPlay { piece, .. } = self {
             Some(piece)
         } else {
             None
@@ -1139,16 +1126,17 @@ impl Game {
                 clear_finish_time: line_clears_finish_time,
             } => line_clears_finish_time,
             Phase::Spawning { spawn_time } => spawn_time,
-            Phase::PieceInPlay { piece_data } => {
-                if let Some(move_time) = piece_data.auto_move_scheduled {
-                    if move_time < piece_data.fall_or_lock_time {
-                        move_time
-                    } else {
-                        piece_data.fall_or_lock_time
+            Phase::PieceInPlay {
+                auto_move_scheduled,
+                fall_or_lock_time,
+                ..
+            } => 'exp: {
+                if let Some(move_time) = auto_move_scheduled {
+                    if move_time < fall_or_lock_time {
+                        break 'exp move_time;
                     }
-                } else {
-                    piece_data.fall_or_lock_time
                 }
+                fall_or_lock_time
             }
         };
 

@@ -38,11 +38,16 @@ impl Add for ExtDuration {
         // Saturating `ExtDuration` addition.
         // Computes `self + other`, returning `ExtDuration::Infinite` if result would overflow `ExtDuration::Finite(Duration::MAX)`.
         match (self, rhs) {
-            (ExtDuration::Finite(dur0), ExtDuration::Finite(dur1))
-                if dur0 <= Duration::MAX.saturating_sub(dur1) =>
-            {
-                ExtDuration::Finite(dur0.saturating_add(dur1))
+            // Adding two finite durations.
+            (ExtDuration::Finite(dur0), ExtDuration::Finite(dur1)) => {
+                if let Some(dur2) = dur0.checked_add(dur1) {
+                    ExtDuration::Finite(dur2)
+                } else {
+                    // They overflowed.
+                    ExtDuration::Infinite
+                }
             }
+            // One of the durations is not finite.
             _ => ExtDuration::Infinite,
         }
     }

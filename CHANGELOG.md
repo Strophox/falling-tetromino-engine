@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 --
 
 
+
+## [1.3.0] - 2026-03-22
+
+### Added
+- `Piece::is_airborne`.
+
+### Changed
+- Player input is now handled before falling/locking/auto-moving if they occur at the exact same in-game-time.
+- Auto-movement is now handled before falling/locking if they occur at the exact same in-game-time.
+- Auto-movement now consistently causes its own timeline event every time. (Relevant for mods.)
+- Use `ChaCha8Rng` (previously `ChaCha12Rng`).
+- Module names: `builder`, `randomization`, `rotation`
+
+### Fixed
+- 
+
+### Removed
+- `struct PieceData { .. }` has been superseded by `Phase::PieceInPlay { .. }`.
+
+
 ## [1.2.0] 2026-03-20
 
 ### Added
@@ -54,11 +74,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     * `TetrominoGenerator::BalanceRelative -> TetrominoGenerator::BalanceOut`
     * `recency` -> `snappy_recency`
 
-### Fixed
-- 
-
-### Removed
-
 
 ## [1.1.0] - 2026-03-08
 
@@ -72,3 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 - Game implementation, notably with update method
+
+### Changed
+-
+
+### Fixed
+-
+
+### Removed
+-

@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 --
 
 
+## [1.4.0] - 2026-03-23
+
+### Added
+- `GameModifier` trait with many, many proper hooks (methods).
+    * `try_clone` for mods!
+
+### Changed
+- Major revamp of Modding facilities.
+- Renames:
+    * 'feedback' terminology becomes 'notification'.
+    * `FeedbackVerbosity` -> `NotificationLevel`.
+    * `Feedback` -> `Notification`.
+    * no more `FeedbackMsg = (Feedback, Time)`, but `NotificationFeed = Vec<(Notification, Time)>`.
+* `Game::clone_unmodded` now becomes the more proper `Game::try_clone` (if modifiers' `try_clone` succeed).
+
+### Fixed
+-
+
+### Removed
+-
+
 
 ## [1.3.0] - 2026-03-22
 
@@ -23,9 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-movement now consistently causes its own timeline event every time. (Relevant for mods.)
 - Use `ChaCha8Rng` (previously `ChaCha12Rng`).
 - Module names: `builder`, `randomization`, `rotation`
-
-### Fixed
-- 
 
 ### Removed
 - `struct PieceData { .. }` has been superseded by `Phase::PieceInPlay { .. }`.

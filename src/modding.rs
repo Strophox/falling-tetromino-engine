@@ -3,10 +3,12 @@ This module handles the modding facilities of the engine.
 */
 
 use crate::{
-    Configuration, Game, InGameTime, Input, NotificationFeed, Phase, State, StateInitialization,
+    Configuration, Game, InGameTime, Input, Notification, NotificationFeed, NotificationLevel,
+    Phase, State, StateInitialization,
 };
 
 /// Helper struct to enable [`GameModifier`]s to access to the game's internals.
+#[derive(PartialEq, Eq, Debug)]
 #[allow(unused, missing_docs)]
 pub struct GameAccess<'a> {
     pub config: &'a mut Configuration,
@@ -15,6 +17,7 @@ pub struct GameAccess<'a> {
     pub phase: &'a mut Phase,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub(crate) enum Hook<'a> {
     GameBuilt,
     GameEnded,
@@ -37,6 +40,12 @@ pub(crate) enum Hook<'a> {
 
 impl Game {
     pub(crate) fn run_mods(&mut self, mut hook_point: Hook, feed: &mut NotificationFeed) {
+        if self.config.notification_level == NotificationLevel::Debug {
+            feed.push((
+                Notification::Debug(format!("{hook_point:?}")),
+                self.state.time,
+            ));
+        }
         for modifier in &mut self.modifiers {
             let modify = modifier.as_mut();
             let game = GameAccess {

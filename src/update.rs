@@ -2,6 +2,8 @@
 This module handles what happens when [`Game::update`] is called.
 */
 
+use crate::modding::Hook;
+
 use super::*;
 
 impl Game {
@@ -9,7 +11,7 @@ impl Game {
     ///
     /// This can be used so `game.has_ended()` returns true and prevents future
     /// calls to `update` from continuing to advance the game.
-    pub fn forfeit(&mut self) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
+    pub fn forfeit(&mut self) -> Result<NotificationFeed, UpdateGameError> {
         let piece_in_play = match self.phase {
             Phase::GameEnd { .. } => {
                 // Do not allow updating a game that has already ended.
@@ -25,10 +27,11 @@ impl Game {
             is_win: false,
         };
 
-        Ok(vec![(
-            self.state.time,
-            Feedback::GameEnded { is_win: false },
-        )])
+        let mut feed = vec![(Notification::GameEnded { is_win: false }, self.state.time)];
+
+        self.run_mods(Hook::GameEnded, &mut feed);
+
+        Ok(feed)
     }
 
     /// The main function used to advance the game state.
@@ -40,21 +43,21 @@ impl Game {
     /// The `input` may then cause additional updates / interactions (which are also
     /// handled exhaustively) before finally returning with in-game time at `target_time`.
     ///
-    /// Unless an error occurs, this function will return all [`FeedbackMsg`]s caused between the
+    /// Unless an error occurs, this function will return all [`NotificationFeed`]s caused between the
     /// previous and the current `update` call, in chronological order.
     ///
     /// # Errors
     ///
     /// This function may error with:
-    /// - [`UpdateGameError::GameEnded`] if `game.ended()` is `true`, indicating that no more updates
+    /// - [`UpdateGameError::AlreadyEnded`] if `game.ended()` is `true`, indicating that no more updates
     ///   can change the game state, or
     /// - [`UpdateGameError::TargetTimeInPast`] if `target_time < game.state().time`, indicating that
     ///   the requested update lies in the past.
     pub fn update(
         &mut self,
-        target_time: InGameTime,
+        mut target_time: InGameTime,
         mut player_input: Option<Input>,
-    ) -> Result<Vec<FeedbackMsg>, UpdateGameError> {
+    ) -> Result<NotificationFeed, UpdateGameError> {
         if target_time < self.state.time {
             // Do not allow updating if target time lies in the past.
             return Err(UpdateGameError::TargetTimeInPast);
@@ -63,15 +66,17 @@ impl Game {
             return Err(UpdateGameError::AlreadyEnded);
         }
 
-        let mut feedback_msgs = Vec::new();
+        let mut feed = Vec::new();
+
+        if player_input.is_some() {
+            self.run_mods(
+                Hook::PlayerInputReceived(&mut target_time, &mut player_input),
+                &mut feed,
+            );
+        }
 
         // We linearly process all events until we reach the targeted update time.
         loop {
-            self.do_apply_modifiers(
-                UpdatePoint::MainLoopHead(&mut player_input),
-                &mut feedback_msgs,
-            );
-
             // Maybe move on to game over if time condition is met now.
             if let Some((time_limit, is_win)) = self.config.game_limits.time_elapsed {
                 // FIXME: We actually end the game *after* an event was processed that moved us beyond the time limit.
@@ -87,43 +92,46 @@ impl Game {
 
             match self.phase {
                 // Game ended by now.
-                // Return accumulated messages.
+                // Return immediately and with accumulated messages.
                 Phase::GameEnd { cause: _, is_win } => {
                     // Add message that game ended.
-                    feedback_msgs.push((self.state.time, Feedback::GameEnded { is_win }));
-
-                    // Return early.
-                    return Ok(feedback_msgs);
+                    feed.push((Notification::GameEnded { is_win }, self.state.time));
+                    self.run_mods(Hook::GameEnded, &mut feed);
+                    return Ok(feed);
                 }
 
                 // Lines clearing.
                 // Move on to spawning.
                 Phase::LinesClearing { clear_finish_time } if clear_finish_time <= target_time => {
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::LinesClearPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
                     self.state.time = clear_finish_time;
-
+                    // Check if game should end.
                     for (stat, is_win_condition) in self.config.game_limits.iter() {
                         if self.check_stat_met(stat) {
+                            // End game immediately.
                             self.phase = Phase::GameEnd {
                                 cause: GameEndCause::Limit(stat),
                                 is_win: is_win_condition,
                             };
                         }
                     }
-
-                    // Return from update due to game end.
-                    self.do_apply_modifiers(UpdatePoint::LinesCleared, &mut feedback_msgs);
+                    self.run_mods(Hook::LinesClearPost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece spawning.
                 // - May move on to game over (BlockOut).
                 // - Normally: Move on to piece-in-play.
                 Phase::Spawning { spawn_time } if spawn_time <= target_time => {
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::SpawnPre(&mut target_time), &mut feed);
                     self.phase = do_spawn(&self.config, &mut self.state, spawn_time);
                     self.state.time = spawn_time;
-
-                    self.do_apply_modifiers(UpdatePoint::PieceSpawned, &mut feedback_msgs);
+                    self.run_mods(Hook::SpawnPost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece being manipulated by player.
@@ -140,9 +148,11 @@ impl Game {
                 {
                     // SAFETY: `player_input.is_some()`.
                     let input = unsafe { player_input.take().unwrap_unchecked() };
+
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::PlayerActionPre(input, &mut target_time), &mut feed);
                     let updated_active_buttons =
                         calc_updated_active_buttons(self.state.active_buttons, input, target_time);
-
                     self.phase = do_player_input(
                         &self.config,
                         &mut self.state,
@@ -153,13 +163,13 @@ impl Game {
                         lowest_y,
                         input,
                         target_time,
-                        &mut feedback_msgs,
+                        &mut feed,
                         &updated_active_buttons,
                     );
                     self.state.time = target_time;
                     self.state.active_buttons = updated_active_buttons;
-
-                    self.do_apply_modifiers(UpdatePoint::PiecePlayed(input), &mut feedback_msgs);
+                    self.run_mods(Hook::PlayerActionPost(input), &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece moving autonomously.
@@ -170,6 +180,8 @@ impl Game {
                     lock_time_cap,
                     lowest_y,
                 } if auto_move_time <= target_time && auto_move_time <= fall_or_lock_time => {
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::AutoMovePre(&mut target_time), &mut feed);
                     self.phase = do_autonomous_move(
                         &self.config,
                         &mut self.state,
@@ -180,8 +192,8 @@ impl Game {
                         lowest_y,
                     );
                     self.state.time = auto_move_time;
-
-                    self.do_apply_modifiers(UpdatePoint::PieceAutoMoved, &mut feedback_msgs);
+                    self.run_mods(Hook::AutoMovePost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece falling.
@@ -192,6 +204,8 @@ impl Game {
                     lock_time_cap,
                     lowest_y,
                 } if fall_time <= target_time && piece.is_airborne(&self.state.board) => {
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::FallPre(&mut target_time), &mut feed);
                     self.phase = do_fall(
                         &self.config,
                         &mut self.state,
@@ -202,8 +216,8 @@ impl Game {
                         lowest_y,
                     );
                     self.state.time = fall_time;
-
-                    self.do_apply_modifiers(UpdatePoint::PieceFell, &mut feedback_msgs);
+                    self.run_mods(Hook::FallPost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece locking.
@@ -214,28 +228,23 @@ impl Game {
                     lock_time_cap: _,
                     lowest_y: _,
                 } if lock_time <= target_time => {
-                    self.phase = do_lock(
-                        &self.config,
-                        &mut self.state,
-                        piece,
-                        lock_time,
-                        &mut feedback_msgs,
-                    );
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::LockPre(&mut target_time), &mut feed);
+                    self.phase =
+                        do_lock(&self.config, &mut self.state, piece, lock_time, &mut feed);
                     self.state.time = lock_time;
-
-                    self.do_apply_modifiers(UpdatePoint::PieceLocked, &mut feedback_msgs);
+                    self.run_mods(Hook::LockPost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // No actions within update target horizon, stop updating.
+                // Return from update due to target time reached.
                 _ => {
                     // Ensure states are updated.
-                    // NOTE: This *might* be redundant in some cases.
-
-                    // NOTE: Ensure time is updated as requested, even when none of above cases triggered.
-                    self.state.time = target_time;
-
+                    // Ensure time is updated as requested, even when none of above cases triggered.
+                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     // NOTE: Ensure buttons are still updated by inputs as requested,
-                    // even if `PieceInPlay` case is not triggered (e.g. during `LinesClearing`).
+                    // even when `PieceInPlay` case was not triggered (e.g. during `LinesClearing`).
                     if let Some(input) = player_input {
                         self.state.active_buttons = calc_updated_active_buttons(
                             self.state.active_buttons,
@@ -243,45 +252,12 @@ impl Game {
                             target_time,
                         );
                     }
-
-                    // Return from update due to target time reached.
-                    return Ok(feedback_msgs);
+                    // NOTE: This *might* be redundant in some cases.
+                    self.state.time = target_time;
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+                    return Ok(feed);
                 }
             }
-        }
-    }
-
-    /// Goes through all internal 'game mods' and applies them sequentially at the given [`ModifierPoint`].
-    fn do_apply_modifiers(
-        &mut self,
-        mut update_point: UpdatePoint<&mut Option<Input>>,
-        feedback_msgs: &mut Vec<FeedbackMsg>,
-    ) {
-        if self.config.feedback_verbosity == FeedbackVerbosity::Debug {
-            use UpdatePoint as UP;
-            let update_point = match &update_point {
-                UP::MainLoopHead(x) => UP::MainLoopHead(format!("{x:?}")),
-                UP::PiecePlayed(b) => UP::PiecePlayed(*b),
-                UP::LinesCleared => UP::LinesCleared,
-                UP::PieceSpawned => UP::PieceSpawned,
-                UP::PieceAutoMoved => UP::PieceAutoMoved,
-                UP::PieceFell => UP::PieceFell,
-                UP::PieceLocked => UP::PieceLocked,
-            };
-            feedback_msgs.push((
-                self.state.time,
-                Feedback::Debug(format!("{update_point:?}")),
-            ));
-        }
-        for modifier in &mut self.modifiers {
-            (modifier.mod_function)(
-                &mut update_point,
-                &mut self.config,
-                &mut self.state_init,
-                &mut self.state,
-                &mut self.phase,
-                feedback_msgs,
-            );
         }
     }
 }
@@ -439,7 +415,7 @@ fn do_player_input(
     previous_lowest_y: isize,
     input: Input,
     input_time: InGameTime,
-    feedback_msgs: &mut Vec<FeedbackMsg>,
+    feed: &mut NotificationFeed,
     updated_active_buttons: &ButtonsState,
 ) -> Phase {
     /*
@@ -602,13 +578,13 @@ fn do_player_input(
         I::Activate(B::DropHard) => {
             updated_piece = updated_piece.teleported(&state.board, (0, -1));
 
-            if config.feedback_verbosity != FeedbackVerbosity::Silent {
-                feedback_msgs.push((
-                    input_time,
-                    Feedback::HardDrop {
+            if config.notification_level != NotificationLevel::Silent {
+                feed.push((
+                    Notification::HardDrop {
                         previous_piece,
                         updated_piece,
                     },
+                    input_time,
                 ));
             }
         }
@@ -1041,7 +1017,7 @@ fn do_lock(
     state: &mut State,
     piece: Piece,
     lock_time: InGameTime,
-    feedback_msgs: &mut Vec<FeedbackMsg>,
+    feed: &mut NotificationFeed,
 ) -> Phase {
     // Before board is changed, precompute whether a piece was 'spun' into position;
     // - 'Spun' pieces give higher score bonus.
@@ -1072,8 +1048,8 @@ fn do_lock(
         state.board[y as usize][x as usize] = Some(tile_type_id);
     }
 
-    if config.feedback_verbosity != FeedbackVerbosity::Silent {
-        feedback_msgs.push((lock_time, Feedback::PieceLocked { piece }));
+    if config.notification_level != NotificationLevel::Silent {
+        feed.push((Notification::PieceLocked { piece }, lock_time));
     }
 
     // Update tally of pieces_locked.
@@ -1112,18 +1088,17 @@ fn do_lock(
         // Update score.
         state.score += score_bonus;
 
-        if config.feedback_verbosity != FeedbackVerbosity::Silent {
-            feedback_msgs.push((
-                lock_time,
-                Feedback::LinesClearing {
+        if config.notification_level != NotificationLevel::Silent {
+            feed.push((
+                Notification::LinesClearing {
                     y_coords: cleared_y_coords,
                     line_clear_start: config.line_clear_duration,
                 },
+                lock_time,
             ));
 
-            feedback_msgs.push((
-                lock_time,
-                Feedback::Accolade {
+            feed.push((
+                Notification::Accolade {
                     score_bonus,
                     tetromino: piece.tetromino,
                     is_spin,
@@ -1131,6 +1106,7 @@ fn do_lock(
                     is_perfect_clear,
                     combo,
                 },
+                lock_time,
             ));
         }
     }

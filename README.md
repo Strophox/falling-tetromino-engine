@@ -119,7 +119,7 @@ struct Configuration {
     line_clear_duration: Duration,
     update_delays_every_n_lineclears: u32,
     game_limits: Vec<(Stat, bool)>,
-    feedback_verbosity: FeedbackVerbosity,
+    notification_level: NotificationLevel,
 }
 
 struct StateInitialization {

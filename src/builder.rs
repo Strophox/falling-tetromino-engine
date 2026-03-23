@@ -1,6 +1,8 @@
 /*!
 This module handles creation / initialization / building of [`Game`]s.
-*/
+ */
+
+use crate::modding::Hook;
 
 use super::*;
 
@@ -29,11 +31,11 @@ impl GameBuilder {
 
     /// Creates a [`Game`] with the information specified by `self`.
     pub fn build(&self) -> Game {
-        self.build_modded([])
+        self.build_modded(Vec::new())
     }
 
     /// Creates a [`Game`] with the information specified by `self` and some one-time `modifiers`.
-    pub fn build_modded(&self, modifiers: impl IntoIterator<Item = Modifier>) -> Game {
+    pub fn build_modded(&self, modifiers: Vec<Box<dyn GameModifier>>) -> Game {
         let seed = self
             .seed
             .unwrap_or_else(|| rand::RngCore::next_u64(&mut rand::rng()));
@@ -43,8 +45,8 @@ impl GameBuilder {
         let fall_delay = config.fall_delay_params.calculate(0);
         let lock_delay = config.lock_delay_params.calculate(0);
 
-        Game {
-            modifiers: modifiers.into_iter().collect(),
+        let mut game = Game {
+            modifiers,
             phase: Phase::Spawning {
                 spawn_time: Duration::ZERO,
             },
@@ -71,7 +73,12 @@ impl GameBuilder {
                 tetromino_generator,
             },
             config,
-        }
+        };
+
+        // Initialize mods.
+        game.run_mods(Hook::GameBuilt, &mut Vec::new());
+
+        game
     }
 }
 
@@ -80,14 +87,14 @@ impl Game {
     /// Creates a blueprint [`GameBuilder`] and an iterator over current modifier identifiers ([`&str`]s) from which the exact game can potentially be rebuilt.
     ///
     /// Note that the `&str`s serve the *client* to identify the modifiers and reapply them onto the `GameBuilder`, as the base engine does not know how to do so.
-    pub fn blueprint(&self) -> (GameBuilder, impl Iterator<Item = &str>) {
+    pub fn blueprint(&self) -> (GameBuilder, Vec<(String, String)>) {
         let builder = GameBuilder {
             seed: Some(self.state_init.seed),
             tetromino_generator: self.state_init.tetromino_generator,
             config: self.config.clone(),
         };
 
-        let mod_descriptors = self.modifiers.iter().map(|m| m.descriptor.as_str());
+        let mod_descriptors = self.modifiers.iter().map(|m| (m.id(), m.args())).collect();
 
         (builder, mod_descriptors)
     }
@@ -200,8 +207,8 @@ impl GameBuilder {
         self
     }
     /// The amount of feedback information that is to be generated.
-    pub fn feedback_verbosity(&mut self, x: FeedbackVerbosity) -> &mut Self {
-        self.config.feedback_verbosity = x;
+    pub fn notification_level(&mut self, x: NotificationLevel) -> &mut Self {
+        self.config.notification_level = x;
         self
     }
 }

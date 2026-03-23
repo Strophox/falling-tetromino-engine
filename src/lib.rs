@@ -526,7 +526,7 @@ pub enum Notification {
     /// Generic text feedback message.
     ///
     /// This is currently unused in the base engine.
-    Text(String),
+    Custom(String),
 }
 
 /// An error that can be thrown by [`Game::update`].

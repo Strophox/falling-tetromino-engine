@@ -489,7 +489,7 @@ pub enum Notification {
         /// Game time where lines started clearing.
         /// Starts simultaneously to when a piece was locked and successfully completed some horizontal [`Line`]s,
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].
-        line_clear_start: InGameTime,
+        line_clear_duration: InGameTime,
     },
     /// A piece was quickly dropped from its original position to a new one.
     HardDrop {

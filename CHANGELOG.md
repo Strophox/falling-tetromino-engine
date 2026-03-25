@@ -26,12 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     * no more `FeedbackMsg = (Feedback, Time)`, but `NotificationFeed = Vec<(Notification, Time)>`.
 * `Game::clone_unmodded` now becomes the more proper `Game::try_clone` (if modifiers' `try_clone` succeed).
 
-### Fixed
--
-
-### Removed
--
-
 
 ## [1.3.0] - 2026-03-22
 

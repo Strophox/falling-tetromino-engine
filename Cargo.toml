@@ -12,7 +12,7 @@ repository = "https://github.com/Strophox/falling-tetromino-engine"
 readme = "README.md"
 keywords = ["blocks", "stacker", "API", "backend", "logic"]
 categories = ["game-development", "game-engines"]
-exclude = [".github/"]
+exclude = [".github/", "RELEASE-CHECKLIST.md"]
 
 [lib]
 name = "falling_tetromino_engine"

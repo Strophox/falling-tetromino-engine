@@ -1092,7 +1092,7 @@ fn do_lock(
             feed.push((
                 Notification::LinesClearing {
                     y_coords: cleared_y_coords,
-                    line_clear_start: config.line_clear_duration,
+                    line_clear_duration: config.line_clear_duration,
                 },
                 lock_time,
             ));

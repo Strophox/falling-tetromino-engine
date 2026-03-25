@@ -24,6 +24,7 @@ pub(crate) enum Hook<'a> {
     PlayerInputReceived(&'a mut InGameTime, &'a mut Option<Input>),
     TimeStateProgressionPre(&'a mut InGameTime),
     TimeStateProgressionPost,
+    CheckGameLimitsPost,
     SpawnPre(&'a mut InGameTime),
     SpawnPost,
     PlayerActionPre(Input, &'a mut InGameTime),
@@ -64,6 +65,7 @@ impl Game {
                     modify.on_time_state_progression_pre(game, feed, time)
                 }
                 Hook::TimeStateProgressionPost => modify.on_time_state_progression_post(game, feed),
+                Hook::CheckGameLimitsPost => modify.on_check_game_limits_post(game, feed),
                 Hook::SpawnPre(time) => modify.on_spawn_pre(game, feed, time),
                 Hook::SpawnPost => modify.on_spawn_post(game, feed),
                 Hook::PlayerActionPre(input, time) => {
@@ -162,6 +164,9 @@ pub trait GameModifier: std::fmt::Debug {
     }
     /// This function gets called anytime and immediately after any step inside the engine is applied which will update the game state in a way where time has been moved forward.
     fn on_time_state_progression_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
+
+    /// This function gets called immediately after the engine has checked all its limiting stats and possibly ended.
+    fn on_check_game_limits_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately before [`Phase::Spawning`] is handled.
     fn on_spawn_pre(

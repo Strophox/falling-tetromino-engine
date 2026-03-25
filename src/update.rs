@@ -108,6 +108,9 @@ impl Game {
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
                     self.state.time = clear_finish_time;
+                    self.run_mods(Hook::LinesClearPost, &mut feed);
+                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+
                     // Check if game should end.
                     for (stat, is_win_condition) in self.config.game_limits.iter() {
                         if self.check_stat_met(stat) {
@@ -118,8 +121,7 @@ impl Game {
                             };
                         }
                     }
-                    self.run_mods(Hook::LinesClearPost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+                    self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
                 }
 
                 // Piece spawning.

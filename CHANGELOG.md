@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 --
 
 
+## [1.5.0] - 2026-03-25
+
+### Changed
+- Minor internal changes to engine.
+    * Notably, score bonus is applied after lines clear, not on lock.
+
+### Fixed
+- Bug where game limited by pieces would only end on lineclear, not lock.
+
+
 ## [1.4.0] - 2026-03-23
 
 ### Added

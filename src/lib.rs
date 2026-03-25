@@ -368,7 +368,7 @@ pub struct State {
     /// The number of consecutive pieces that have been played and caused a line clear.
     pub consecutive_line_clears: u32,
     /// The current total score the player has achieved in this round of play.
-    pub score: u32,
+    pub points: u32,
 }
 
 /// Represents how a game can end.
@@ -435,6 +435,8 @@ pub enum Phase {
     LinesClearing {
         /// The in-game time at which the game moves on to the next `Phase.`
         clear_finish_time: InGameTime,
+        /// The score bonus that will be earned once the lines are cleared out.
+        score_bonus: u32,
     },
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
@@ -1037,8 +1039,8 @@ impl Game {
         let mut update_time = match self.phase {
             Phase::GameEnd { .. } => return None,
             Phase::LinesClearing {
-                clear_finish_time: line_clears_finish_time,
-            } => line_clears_finish_time,
+                clear_finish_time, ..
+            } => clear_finish_time,
             Phase::Spawning { spawn_time } => spawn_time,
             Phase::PieceInPlay {
                 auto_move_scheduled,
@@ -1070,7 +1072,7 @@ impl Game {
             Stat::TimeElapsed(t) => t <= self.state.time,
             Stat::PiecesLocked(p) => p <= self.state.pieces_locked.iter().sum(),
             Stat::LinesCleared(l) => l <= self.state.lineclears,
-            Stat::PointsScored(s) => s <= self.state.score,
+            Stat::PointsScored(s) => s <= self.state.points,
         }
     }
 

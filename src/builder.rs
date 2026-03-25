@@ -66,7 +66,7 @@ impl GameBuilder {
                 pieces_locked: [0; Tetromino::VARIANTS.len()],
                 lineclears: 0,
                 consecutive_line_clears: 0,
-                score: 0,
+                points: 0,
             },
             state_init: StateInitialization {
                 seed,

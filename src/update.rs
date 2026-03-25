@@ -88,6 +88,7 @@ impl Game {
                         is_win,
                     };
                 }
+                self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
             }
 
             match self.phase {
@@ -102,22 +103,36 @@ impl Game {
 
                 // Lines clearing.
                 // Move on to spawning.
-                Phase::LinesClearing { clear_finish_time } if clear_finish_time <= target_time => {
+                Phase::LinesClearing {
+                    clear_finish_time,
+                    score_bonus,
+                } if clear_finish_time <= target_time => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::LinesClearPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
+                    self.state.points += score_bonus;
                     self.state.time = clear_finish_time;
                     self.run_mods(Hook::LinesClearPost, &mut feed);
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
 
                     // Check if game should end.
-                    for (stat, is_win_condition) in self.config.game_limits.iter() {
-                        if self.check_stat_met(stat) {
+                    if let Some((line_limit, is_win)) = self.config.game_limits.lines_cleared {
+                        if line_limit <= self.state.lineclears {
                             // End game immediately.
                             self.phase = Phase::GameEnd {
-                                cause: GameEndCause::Limit(stat),
-                                is_win: is_win_condition,
+                                cause: GameEndCause::Limit(Stat::LinesCleared(line_limit)),
+                                is_win,
+                            };
+                        }
+                    } else if let Some((points_limit, is_win)) =
+                        self.config.game_limits.points_scored
+                    {
+                        if points_limit <= self.state.points {
+                            // End game immediately.
+                            self.phase = Phase::GameEnd {
+                                cause: GameEndCause::Limit(Stat::PointsScored(points_limit)),
+                                is_win,
                             };
                         }
                     }
@@ -237,6 +252,17 @@ impl Game {
                     self.state.time = lock_time;
                     self.run_mods(Hook::LockPost, &mut feed);
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+
+                    if let Some((pieces_limit, is_win)) = self.config.game_limits.pieces_locked {
+                        if pieces_limit <= self.state.pieces_locked.iter().sum() {
+                            // End game immediately.
+                            self.phase = Phase::GameEnd {
+                                cause: GameEndCause::Limit(Stat::PiecesLocked(pieces_limit)),
+                                is_win,
+                            };
+                        }
+                    }
+                    self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
                 }
 
                 // No actions within update target horizon, stop updating.
@@ -1057,6 +1083,11 @@ fn do_lock(
     // Update tally of pieces_locked.
     state.pieces_locked[piece.tetromino as usize] += 1;
 
+    // Update ability to hold piece.
+    if let Some((_held_tet, swap_allowed)) = &mut state.piece_held {
+        *swap_allowed = true;
+    }
+
     // Score bonus calculation.
 
     // Find lines which might get cleared by piece locking. (actual clearing done later).
@@ -1072,64 +1103,57 @@ fn do_lock(
     if lineclears == 0 {
         // If no lines cleared, no score bonus and combo is reset.
         state.consecutive_line_clears = 0;
-    } else {
-        // Increase combo.
-        state.consecutive_line_clears += 1;
 
-        let combo = state.consecutive_line_clears;
-
-        let is_perfect_clear = state.board.iter().all(|line| {
-            line.iter().all(|tile| tile.is_none()) || line.iter().all(|tile| tile.is_some())
-        });
-
-        // Compute main Score Bonus.
-        let score_bonus =
-            lineclears * if is_spin { 2 } else { 1 } * if is_perfect_clear { 4 } else { 1 } * 2 - 1
-                + (combo - 1);
-
-        // Update score.
-        state.score += score_bonus;
-
-        if config.notification_level != NotificationLevel::Silent {
-            feed.push((
-                Notification::LinesClearing {
-                    y_coords: cleared_y_coords,
-                    line_clear_duration: config.line_clear_duration,
-                },
-                lock_time,
-            ));
-
-            feed.push((
-                Notification::Accolade {
-                    score_bonus,
-                    tetromino: piece.tetromino,
-                    is_spin,
-                    lineclears,
-                    is_perfect_clear,
-                    combo,
-                },
-                lock_time,
-            ));
-        }
+        // 'Update' ActionState;
+        // No lines cleared, directly proceed to spawn.
+        return Phase::Spawning {
+            spawn_time: lock_time.saturating_add(config.spawn_delay),
+        };
     }
 
-    // Update ability to hold piece.
-    if let Some((_held_tet, swap_allowed)) = &mut state.piece_held {
-        *swap_allowed = true;
+    // Further calculation.
+
+    // Increase combo.
+    state.consecutive_line_clears += 1;
+
+    let combo = state.consecutive_line_clears;
+
+    let is_perfect_clear = state.board.iter().all(|line| {
+        line.iter().all(|tile| tile.is_none()) || line.iter().all(|tile| tile.is_some())
+    });
+
+    // Compute main Score Bonus.
+    let score_bonus =
+        lineclears * if is_spin { 2 } else { 1 } * if is_perfect_clear { 4 } else { 1 } * 2 - 1
+            + (combo - 1);
+
+    if config.notification_level != NotificationLevel::Silent {
+        feed.push((
+            Notification::LinesClearing {
+                y_coords: cleared_y_coords,
+                line_clear_duration: config.line_clear_duration,
+            },
+            lock_time,
+        ));
+
+        feed.push((
+            Notification::Accolade {
+                score_bonus,
+                tetromino: piece.tetromino,
+                is_spin,
+                lineclears,
+                is_perfect_clear,
+                combo,
+            },
+            lock_time,
+        ));
     }
 
     // 'Update' ActionState;
-    // Return it to the main state machine with all newly acquired piece data.
-    if lineclears == 0 {
-        // No lines cleared, directly proceed to spawn.
-        Phase::Spawning {
-            spawn_time: lock_time.saturating_add(config.spawn_delay),
-        }
-    } else {
-        // Lines cleared, enter line clearing state.
-        Phase::LinesClearing {
-            clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
-        }
+    // Lines must be cleared, enter line clearing state.
+    Phase::LinesClearing {
+        clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
+        score_bonus,
     }
 }
 

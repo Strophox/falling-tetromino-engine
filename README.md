@@ -4,103 +4,137 @@
 [![Documentation](https://docs.rs/falling-tetromino-engine/badge.svg)](https://docs.rs/falling-tetromino-engine)
 [![License](https://img.shields.io/crates/l/falling-tetromino-engine)](https://github.com/Strophox/falling-tetromino-engine#license)
 
-A backend with ergonomic API for games where tetrominos fall and stack.
+A tetromino stacker engine in Rust, with the goals of being featureful, efficient and elegant.
+
 
 ## Installation
 
-Add this to your Cargo.toml:
+Do `cargo add falling-tetromino-engine`.
 
+Most engine types support use with [`serde`](https://crates.io/crates/serde):
 ```toml
 [dependencies]
-falling-tetromino-engine = "1.2.0"
+falling-tetromino-engine = { version = "1.0.0", features = ["serde"] }
 ```
 
 
-# About
-
-The engine is completely frontend-agnostic, although calls to `Game::update` may optionally return additional info to facilitate implementation of visual effects.
-
-The engine allows for compile-time mods which may arbitrarily access and modify game state during gameplay.
-
-The engine aims to compete on the order of modern tetromino stackers;
-It incorporates many features found in such games.
-Experienced players may be familiar with most of the following mechanics:
-- **Variable gravity/fall delay** (frame-agnostic); '20G' (= 0s fall delay),
-- Simple but flexible programming of **custom fall and lock delay progressions** (`DelayParameters`),
-- (Arbitrary) **piece preview**,
-- **Pre-spawn actions** toggle ('Initial Hold/Rotation System'),
-- **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
-- **Tetromino generators**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balancerelative',
-- **Spawn delay** (ARE),
-- **Delayed auto-shift** (DAS),
-- **Auto-repeat rate** (ARR),
-- **Soft drop factor** (SDF),
-- **Lenient lock delay reset** toggle (reset lock delay even if rotate/move fails),
-- **Ensure move delay less than lock delay** toggle (DAS/ARR automatically shortened when lock delay is very low),
-- **Lock-reset-cap factor** (~maximum time before lock delay cannot be reset),
-- **Line clear duration** (LCD),
-- Custom **win/loss conditions based on stats**: time, pieces, lines, score,
-- **Hold** piece,
-- Higher **score** for larger lineclears and spins ('allspin')
-- Game **reproducibility** (PRNG),
-- Available player actions: MoveLeft, MoveRight; RotateLeft, RotateRight, Rotate180; DropSoft, DropHard, TeleDown ('Sonic drop'), TeleLeft, TeleRight, HoldPiece.
-
-
-# Example Usage
+## Simple Example
 
 ```rust
 use falling_tetromino_engine::*;
 
-// Starting up a game - note that in-game time starts at 0s.
+// Initialize a game. In-game time starts at 0s.
 let mut game = Game::builder()
     .seed(1234)
-    /* ...Further optional configuration possible... */
+    /* Further customization possible here. */
     .build();
 
-// Updating the game with the info that 'left' should be pressed at second 4.2;
-// If a piece is in the game, it will try to move left.
+// Update the game with info that 'left' is activated at second 4.2 (i.e. piece starts moving left).
 let input = Input::Activate(Button::MoveLeft);
 game.update(InGameTime::from_secs(4.2), Some(input));
 
-// ...
-
-// Updating the game with the info that no input change has occurred up to second 6.79;
-// This updates the game, e.g., pieces fall and lock.
+// Update the game with info that no input changes up to second 6.79 (e.g. piece falls).
 game.update(InGameTime::from_secs(6.79), None);
 
-// Read most recent game state;
-// This is how a UI can know how to render the board, etc.
+// Read game state (for rendering etc.)
 let State { board, .. } = game.state();
 ```
 
-Internally, the game keeps its own timeline:
+Internally, the game processes a pure timeline like so:
 ```
-    0s - Game start; Piece is spawned.
-   /        4.2s - Player input; Piece starts moving left.
-  /        /            6.79s - Piece will have moved left some more,
- /        /            /        has been affected by gravity etc.
-[--------|------------¦--------------- - - - ->
+    0s - Game start, spawn piece.
+   /        4.2s - Player input, start moving piece.
+  /        /            6.79s - (Piece has moved left more,
+ /        /            /        fallen due to gravity etc.)
+[--------|---------------------------- - - - ->
 ```
 
 
-# Overview by Types
+## Implementation Idea
+
+The game keeps:
+- **Configuration** to read from, which determines game behavior.
+- **State values** which persists throughout the game's lifetime.
+- Dedicated and separate **'phase'-state** field.
+    - It represents a state machine and can store values specific to each separate stage during the game
+    - E.g., 'spawning' (no piece) vs. 'piece is in play' (with data to keep track of).
+
+During each update, the game looks at the (very limited) number of upcoming in-game events and processes them.
+The only complicated phase is `Phase::PieceInPlay { .. }`, the only where there can be several upcoming events (priority in the given order):
+- **Action by player**: Player input which causes e.g. the piece to move, makes it lock immediately or cancels auto-movement.
+- **Autonomous movement**: While player holds down move buttons, the piece should move autonomously.
+- **Falling *or* locking**: Whenever the piece is airborne *or* grounded, there is an upcoming fall *or* lock scheduled.
+
+A current point of investigation remain the ergonomics of engine hooks for modding.
+
+
+## Features Overview
+
+- The engine is frontend-agnostic (i.e. only implements the game logic and by itself does not prescribe how to interact with the real world, does not know about frames, the keyboard etc.).
+- Depending on configuration, calls to `Game::update` and `Game::forfeit` can return additional information (`Notification`) which can facilitate frontend implementation (e.g. hard drop and other visual effects).
+- The engine provides possibilities for compile-time modding. Mods may arbitrarily access and modify game state when called on given engine hooks.
+
+The engine aims to compete on the order of modern tetromino stackers;
+It should incorporate many mechanics desired by familiar/experienced players, such as:
+- Available player actions:
+    - Move left/right,
+    - Rotate left/right/180°
+    - Drop soft/hard
+    - Teleport down(='Sonic drop')/left/right
+    - Hold piece,
+- **Tetromino randomizers**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balance-out',
+- **Piece preview** (arbitrary size),
+- **Spawn delay** (ARE),
+- **Initial actions** on-piece-spawn toggle ('Initial Hold/Rotation System'),
+- **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
+- **Delayed auto-move** (DAS),
+- **Auto-move rate** (ARR),
+- **Soft drop factor** (SDF),
+- **Customizable gravity/fall and lock delay curves** (including '20G' = 0s fall delay),
+- **Ensure move delay less than lock delay** toggle (i.e. DAS/ARR are automatically shortened when lock delay is very low),
+- **Allow lenient lock-reset** toggle (i.e. reset lock delay even if rotate/move fails),
+- **Lock-reset cap factor** (i.e. maximum time before lock delay cannot be reset),
+- **Line clear duration** (LCD),
+- **Customizable win/loss conditions** based on the time, pieces, lines, score,
+- Higher **score** for larger lineclears and spins ('allspin'),
+- Game **reproducibility** (PRNG).
+
+
+## Features and Implementation Overview by Type definitions and API
 
 Much of the implementation is tightly encoded into types.
+It may be instructive to simply consider the main type definitions for good insight into the deeper engine mechanics.
+See also [full documentation](https://docs.rs/falling-tetromino-engine).
 
+### Main `Game` type
 ```rust
-// The central engine type.
+// The main engine type.
 struct Game {
-    config: Configuration, // Can be safely modified during play.
-    state_init: StateInitialization, // For reproducibility.
+    // May be modified by user, will not be modified by Game.
+    config: Configuration,
+    // Cannot be modified, basic data used for reproducibility.
+    state_init: StateInitialization,
+    // Cannot be modified by user, used by Game.
     state: State,
-    phase: Phase, // Macro-state-machine.
-    modifiers: Vec<Modifier>, // Modding facility.
+    // Cannot be modified by user, used by Game.
+    phase: Phase,
+    // Modding.
+    modifiers: Vec<Modifier>,
+}
+
+impl Game {
+  fn update(
+    &mut self,
+    mut target_time: InGameTime,
+    mut player_input: Option<Input>, // "With or without button changes."
+  ) -> Result<NotificationFeed, UpdateGameError>;
+
+  fn forfeit(&mut self) -> Result<NotificationFeed, UpdateGameError>;
 }
 ```
 
-It may be instructive to simply consider the main type definitions as a tentative overview of the deeper engine mechanics.
 
-### Types used as `Game` fields
+### `Game` fields types
 
 ```rust
 struct Configuration {
@@ -153,22 +187,17 @@ enum Phase {
         lock_time_cap: InGameTime,
         lowest_y: isize,
     },
-    LinesClearing { clears_finish_time: InGameTime },
+    LinesClearing { clear_finish_time: InGameTime, score_bonus: u32 },
     GameEnd { cause: GameEndCause, is_win: bool },
-}
-
-struct Modifier {
-    descriptor: String,
-    mod_function: Box<GameModFn>,
 }
 ```
 
-### Other Important Types
+### Some Other Types
 
 ```rust
-enum Tetromino {
-    O, I, S, Z, T, L, J
-}
+enum Tetromino { O, I, S, Z, T, L, J, }
+
+enum Orientation { N, E, S, W, }
 
 struct Piece {
     tetromino: Tetromino,
@@ -184,12 +213,82 @@ enum Button {
     HoldPiece,
 }
 
+enum Input { Activate(Button), Deactivate(Button), }
+
+type InGameTime = Duration;
+type GameRng = ChaCha8Rng;
+
 struct DelayParameters {
     base_delay: ExtDuration,
     factor: ExtNonNegF64,
     subtrahend: ExtDuration,
     lowerbound: ExtDuration,
 }
+
+enum Notification {
+    PieceLocked { piece: Piece },
+    LinesClearing {
+        y_coords: Vec<usize>,
+        line_clear_duration: InGameTime,
+    },
+    HardDrop {
+        previous_piece: Piece,
+        updated_piece: Piece,
+    },
+    Accolade {
+        score_bonus: u32,
+        lineclears: u32,
+        combo: u32,
+        is_spin: bool,
+        is_perfect_clear: bool,
+        tetromino: Tetromino,
+    },
+    GameEnded {
+        is_win: bool,
+    },
+    Debug(String),
+    Custom(String),
+}
+
+enum NotificationLevel { Silent, Standard, Debug, }
+
+enum UpdateGameError { TargetTimeInPast, AlreadyEnded, }
+
+enum GameEndCause {
+    LockOut { locking_piece: Piece },
+    BlockOut { blocked_piece: Piece },
+    TopOut { blocked_lines: Vec<Line> },
+    Limit(Stat),
+    Forfeit { piece_in_play: Option<Piece> },
+    Custom(String),
+}
 ```
 
-See [full documentation](https://docs.rs/falling-tetromino-engine).
+### Modding
+
+```rust
+trait GameModifier: std::fmt::Debug {
+    fn id(&self) -> String;
+    fn args(&self) -> String;
+    fn try_clone(&self) -> Result<Box<dyn GameModifier>, String>;
+
+    fn on_player_input_received(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime, player_input: &mut Option<Input>) {}
+    fn on_game_built(&mut self, game: GameAccess) {}
+    fn on_game_ended(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_time_state_progression_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_time_state_progression_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_check_game_limits_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_spawn_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_spawn_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_player_action_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, input: Input, time: &mut InGameTime) {}
+    fn on_player_action_post(&mut self, game: GameAccess, feed: &mut NotificationFeed, input: Input) {}
+    fn on_auto_move_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_auto_move_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_fall_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_fall_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_lock_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_lock_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_lines_clear_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_lines_clear_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+}
+```

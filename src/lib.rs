@@ -589,18 +589,20 @@ impl Tetromino {
     }
 
     /// Calculate the piece data that would result from spawning this tetromino as a piece in-play.
-    pub fn piece_spawn_state(self) -> Piece {
-        // Position of spawned piece.
-        // FIXME: Should depend on Game/board size.
-        let position = match self {
-            Tetromino::O => (4, Game::LOCK_OUT_HEIGHT as isize),
-            _ => (3, Game::LOCK_OUT_HEIGHT as isize),
+    pub const fn piece_spawn_state(self) -> Piece {
+        let tet_width = match self {
+            Tetromino::O => 2,
+            Tetromino::I => 4,
+            _ => 3,
         };
 
         Piece {
             tetromino: self,
             orientation: Orientation::N,
-            position,
+            position: (
+                ((Game::WIDTH - tet_width) / 2) as isize,
+                Game::LOCK_OUT_HEIGHT as isize,
+            ),
         }
     }
 

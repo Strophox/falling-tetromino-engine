@@ -551,7 +551,7 @@ impl Tetromino {
     };
 
     /// Returns the mino offsets of a tetromino shape, given an orientation.
-    pub const fn minos(&self, oriented: Orientation) -> [Coord; 4] {
+    pub const fn minos(self, oriented: Orientation) -> [Coord; 4] {
         use Orientation::*;
         match self {
             Tetromino::O => [(0, 0), (1, 0), (0, 1), (1, 1)], // ⠶
@@ -588,8 +588,24 @@ impl Tetromino {
         }
     }
 
+    /// Calculate the piece data that would result from spawning this tetromino as a piece in-play.
+    pub fn piece_spawn_state(self) -> Piece {
+        // Position of spawned piece.
+        // FIXME: Should depend on Game/board size.
+        let position = match self {
+            Tetromino::O => (4, Game::LOCK_OUT_HEIGHT as isize),
+            _ => (3, Game::LOCK_OUT_HEIGHT as isize),
+        };
+
+        Piece {
+            tetromino: self,
+            orientation: Orientation::N,
+            position,
+        }
+    }
+
     /// Returns the convened-on standard tile id corresponding to the given tetromino.
-    pub const fn tiletypeid(&self) -> TileTypeID {
+    pub const fn tiletypeid(self) -> TileTypeID {
         use Tetromino::*;
         let u8 = match self {
             O => 1,
@@ -617,8 +633,8 @@ impl Orientation {
     /// Find a new direction by turning right some number of times.
     ///
     /// This accepts `i32` to allow for left rotation.
-    pub const fn reorient_right(&self, right_turns: i8) -> Self {
-        Orientation::VARIANTS[((*self as i8 + right_turns) as usize).rem_euclid(4)]
+    pub const fn turn_right(self, turns: i8) -> Self {
+        Orientation::VARIANTS[((self as i8 + turns) as usize).rem_euclid(4)]
     }
 }
 
@@ -672,7 +688,7 @@ impl Piece {
     ) -> Result<Piece, Piece> {
         let reoriented_offset_piece = Piece {
             tetromino: self.tetromino,
-            orientation: self.orientation.reorient_right(right_turns),
+            orientation: self.orientation.turn_right(right_turns),
             position: add(self.position, offset),
         };
 
@@ -699,7 +715,7 @@ impl Piece {
         let original_pos = self.position;
 
         let mut updated_piece = *self;
-        updated_piece.orientation = updated_piece.orientation.reorient_right(right_turns);
+        updated_piece.orientation = updated_piece.orientation.turn_right(right_turns);
         for offset in offsets {
             updated_piece.position = add(original_pos, offset);
             if updated_piece.fits_onto(board) {

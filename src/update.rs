@@ -321,18 +321,8 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
         }
     }
 
-    // Prepare data of spawned piece.
-    let position = match next_tetromino {
-        Tetromino::O => (4, Game::LOCK_OUT_HEIGHT as isize),
-        _ => (3, Game::LOCK_OUT_HEIGHT as isize),
-    };
-
     // 'Raw' spawn piece, before remaining prespawn_actions are applied.
-    let piece_v1_raw = Piece {
-        tetromino: next_tetromino,
-        orientation: Orientation::N,
-        position,
-    };
+    let piece_v1_raw = next_tetromino.piece_spawn_state();
 
     // "Initial Rotation" system.
 

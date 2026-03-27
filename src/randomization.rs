@@ -129,8 +129,8 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                     }
                 }
 
-                // Produce uniform weights for all remaining pieces.
-                let weights = tets_stocked.iter().map(|&n| if n > 0 { 1 } else { 0 });
+                // Produce proportional weights for all remaining pieces.
+                let weights = tets_stocked.iter();
 
                 // SAFETY:
                 // * `InvalidInput`: Iterator `weights` is nonempty (7).

@@ -479,9 +479,10 @@ fn do_player_input(
     * Our *other effects* consist of the immediate movement we might want to accomplish.
 
     Goals:
+    * We want to understand when an immediate move is actually performed.
+      It turns out this is if and only if a move activation input is received.
     * We want to understand when auto-move time needs to be set anew.
-      This can be seen in Table (⁵) in entries marked (ˢ) and coincides with
-      a direct move performed.
+      This can be seen in Table (⁵) in entries marked (ˢ).
     * We want to understand when auto-move time needs to be canceled.
       This can be seen in Table (⁵) in entries marked (ᶜ) and coincides with
       on last move button deactivated.
@@ -624,20 +625,20 @@ fn do_player_input(
             let (l, r) = (prev_l.is_some(), prev_r.is_some());
 
             // *Setting auto-move time* (alt): !(Deact_L !L>=R || Deact_R !L=<R)
-            let sentinel_setmvmt = {
+            let rescheduleautomove = {
                 let a = matches!(input, I::Deactivate(B::MoveLeft)) && !(r && prev_l >= prev_r);
                 let b = matches!(input, I::Deactivate(B::MoveRight)) && !(l && prev_l <= prev_r);
                 !(a || b)
             };
 
             // *Canceling auto-move time*: L r Deact_l  ||  r L Deact_L
-            let sentinel_cancelmvmt = {
+            let cancelautomove = {
                 let a = l && !r && matches!(input, I::Deactivate(B::MoveLeft));
                 let b = !l && r && matches!(input, I::Deactivate(B::MoveRight));
                 a || b
             };
 
-            computed_move_input_data = Some((sentinel_setmvmt, sentinel_cancelmvmt));
+            computed_move_input_data = Some((rescheduleautomove, cancelautomove));
         }
 
         // Various button releases.
@@ -661,7 +662,7 @@ fn do_player_input(
     // See also (³).
 
     let updated_auto_move_scheduled = 'exp: {
-        let Some((is_moving_left, dir_active_since)) =
+        let Some((is_moving_left, mut dir_active_since)) =
             calc_is_moving_left_and_dir_active_since(updated_active_buttons)
         else {
             // No sensible movement information received.
@@ -671,31 +672,34 @@ fn do_player_input(
         let dx = if is_moving_left { -1 } else { 1 };
 
         // Handle case where movement input was activated.
-        if let Some((initiate_mvmt, cancel_mvmt)) = computed_move_input_data {
-            break 'exp if initiate_mvmt {
-                if let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) {
-                    updated_piece = moved_piece;
-                    // Able to do relevant move; Set autonomous movement.
-                    let is_airborne = updated_piece.is_airborne(&state.board);
-                    let auto_move_time = calc_auto_move_time(
-                        config,
-                        state,
-                        input_time,
-                        dir_active_since,
-                        is_airborne,
-                    );
-                    Some(auto_move_time)
-                } else {
+        if let Some((rescheduleautomove, cancelautomove)) = computed_move_input_data {
+            if rescheduleautomove {
+                let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) else {
                     // Unable to move; Unschedule autonomous movement.
-                    None
+                    break 'exp None;
+                };
+
+                // Actually do move.
+                if matches!(input, Input::Activate(_)) {
+                    updated_piece = moved_piece;
+                } else {
+                    dir_active_since = input_time;
                 }
-            } else if cancel_mvmt {
+
+                // Reschedule autonomous movement.
+                let is_airborne = updated_piece.is_airborne(&state.board);
+                let auto_move_time =
+                    calc_auto_move_time(config, state, input_time, dir_active_since, is_airborne);
+                break 'exp Some(auto_move_time);
+            }
+
+            if cancelautomove {
                 // Buttons deactivated; Cancel autonomous movement.
-                None // Buttons unpressed: Remove autonomous movement.
-            } else {
-                // No relevant movement changes caused by mvmt-related button input: Don't do anything.
-                previous_auto_move_scheduled
-            };
+                break 'exp None; // Buttons unpressed: Remove autonomous movement.
+            }
+
+            // No relevant movement changes caused by mvmt-related button input: Don't do anything.
+            break 'exp previous_auto_move_scheduled;
         }
 
         if calc_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
@@ -1192,10 +1196,13 @@ fn calc_updated_active_buttons(
     input_time: InGameTime,
 ) -> ButtonsState {
     match input {
-        Input::Activate(button) => previous_active_buttons[button] = Some(input_time),
-        Input::Deactivate(button) => previous_active_buttons[button] = None,
+        Input::Activate(button) => {
+            previous_active_buttons[button] = Some(input_time);
+        }
+        Input::Deactivate(button) => {
+            previous_active_buttons[button] = None;
+        }
     }
-
     previous_active_buttons
 }
 

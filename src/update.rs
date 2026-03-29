@@ -688,8 +688,13 @@ fn do_player_input(
 
                 // Reschedule autonomous movement.
                 let is_airborne = updated_piece.is_airborne(&state.board);
-                let auto_move_time =
-                    calc_auto_move_time(config, state, input_time, dir_active_since, is_airborne);
+                let auto_move_time = calc_next_auto_move_time(
+                    config,
+                    state,
+                    input_time,
+                    dir_active_since,
+                    is_airborne,
+                );
                 break 'exp Some(auto_move_time);
             }
 
@@ -702,7 +707,7 @@ fn do_player_input(
             break 'exp previous_auto_move_scheduled;
         }
 
-        if calc_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
+        if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
             break 'exp Some(input_time);
@@ -739,15 +744,8 @@ fn do_player_input(
         let fall_reset = !previous_is_airborne
             || matches!(input, I::Activate(B::DropSoft) | I::Deactivate(B::DropSoft));
         if fall_reset {
-            // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.
-            input_time.saturating_add(
-                if updated_active_buttons[Button::DropSoft].is_some() {
-                    state.fall_delay.div_ennf64(config.soft_drop_factor)
-                } else {
-                    state.fall_delay
-                }
-                .saturating_duration(),
-            )
+            // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.}
+            calc_next_fall_time(state, config, input_time, updated_active_buttons)
         } else {
             // Falling as before.
             previous_fall_or_lock_time
@@ -856,7 +854,7 @@ fn do_autonomous_move(
             let updated_piece = moved_piece;
             // Able to do relevant move; Insert autonomous movement.
             let is_airborne = updated_piece.is_airborne(&state.board);
-            let auto_move_time = calc_auto_move_time(
+            let auto_move_time = calc_next_auto_move_time(
                 config,
                 state,
                 auto_move_time,
@@ -885,14 +883,7 @@ fn do_autonomous_move(
 
         if was_grounded {
             // Refresh fall timer if we *started* falling.
-            auto_move_time.saturating_add(
-                if state.active_buttons[Button::DropSoft].is_some() {
-                    state.fall_delay.div_ennf64(config.soft_drop_factor)
-                } else {
-                    state.fall_delay
-                }
-                .saturating_duration(),
-            )
+            calc_next_fall_time(state, config, auto_move_time, &state.active_buttons)
         } else {
             // Falling as before.
             previous_fall_or_lock_time
@@ -989,14 +980,7 @@ fn do_fall(
     let updated_is_airborne = updated_piece.is_airborne(&state.board);
 
     let updated_fall_or_lock_time = if updated_is_airborne {
-        fall_time.saturating_add(
-            if state.active_buttons[Button::DropSoft].is_some() {
-                state.fall_delay.div_ennf64(config.soft_drop_factor)
-            } else {
-                state.fall_delay
-            }
-            .saturating_duration(),
-        )
+        calc_next_fall_time(state, config, fall_time, &state.active_buttons)
     } else {
         // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
         fall_time
@@ -1013,7 +997,7 @@ fn do_fall(
         };
 
         let dx = if is_moving_left { -1 } else { 1 };
-        if calc_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
+        if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
             break 'exp Some(fall_time);
@@ -1206,6 +1190,18 @@ fn calc_updated_active_buttons(
     previous_active_buttons
 }
 
+fn check_piece_became_movable(
+    previous_piece: Piece,
+    updated_piece: Piece,
+    board: &Board,
+    dx: isize,
+) -> bool {
+    let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
+    let moved_updated_piece = updated_piece.offset_on(board, (dx, 0));
+
+    moved_previous_piece.is_err() && moved_updated_piece.is_ok()
+}
+
 /// This function may return an integer = `-1` | `1` and a time at or after `move_time` for the next designated auto-move.
 /// It returns `None` when it cannot determine a direction to move to, which happens when:
 /// * Both directions were pressed at the exact same in-game time, or
@@ -1238,7 +1234,7 @@ fn calc_is_moving_left_and_dir_active_since(
     )
 }
 
-fn calc_auto_move_time(
+fn calc_next_auto_move_time(
     config: &Configuration,
     state: &State,
     current_time: InGameTime,
@@ -1264,16 +1260,21 @@ fn calc_auto_move_time(
     current_time.saturating_add(move_delay)
 }
 
-fn calc_piece_became_movable(
-    previous_piece: Piece,
-    updated_piece: Piece,
-    board: &Board,
-    dx: isize,
-) -> bool {
-    let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
-    let moved_updated_piece = updated_piece.offset_on(board, (dx, 0));
+fn calc_next_fall_time(
+    state: &State,
+    config: &Configuration,
+    current_time: InGameTime,
+    active_buttons: &ButtonsState,
+) -> InGameTime {
+    let fall_delay = if active_buttons[Button::TeleDown].is_some() {
+        ExtDuration::ZERO
+    } else if active_buttons[Button::DropSoft].is_some() {
+        state.fall_delay.div_ennf64(config.soft_drop_factor)
+    } else {
+        state.fall_delay
+    };
 
-    moved_previous_piece.is_err() && moved_updated_piece.is_ok()
+    current_time.saturating_add(fall_delay.saturating_duration())
 }
 
 // Compute the fall and lock delay corresponding to the current lineclear progress.

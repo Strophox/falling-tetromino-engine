@@ -291,7 +291,7 @@ impl Game {
 }
 
 fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -> Phase {
-    let [active_movlf, active_movrt, active_rotlf, active_rotrt, active_rot180, _ds, _dh, _td, _tl, _tr, active_hld] =
+    let [active_movlf, active_movrt, active_rotlf, active_rotrt, active_rot180, _ds, _dh, _td, active_tellf, active_telrt, active_hld] =
         state
             .active_buttons
             .map(|keydowntime| keydowntime.is_some());
@@ -407,7 +407,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     // Schedule immediate move after spawning, if any move button held.
     // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
-    let auto_move_scheduled = if active_movlf || active_movrt {
+    let auto_move_scheduled = if active_movlf || active_movrt || active_tellf || active_telrt {
         Some(spawn_time)
     } else {
         None
@@ -545,7 +545,7 @@ fn do_player_input(
     */
 
     // Prepare to maybe change the move_scheduled.
-    let mut computed_move_input_data: Option<(bool, bool)> = None;
+    let mut computed_auto_move_sentinels: Option<(bool, bool)> = None;
 
     let mut updated_piece = previous_piece;
     use {Button as B, Input as I};
@@ -638,7 +638,12 @@ fn do_player_input(
                 a || b
             };
 
-            computed_move_input_data = Some((rescheduleautomove, cancelautomove));
+            computed_auto_move_sentinels = Some((rescheduleautomove, cancelautomove));
+        }
+
+        I::Deactivate(B::TeleLeft | B::TeleRight) => {
+            // FIXME: This is necessary to handle niche cases. E.g., try pressing in order with 0msARR: ML, MR, TL, TR.
+            computed_auto_move_sentinels = Some((true, false));
         }
 
         // Various button releases.
@@ -650,8 +655,6 @@ fn do_player_input(
             | B::DropSoft
             | B::DropHard
             | B::TeleDown
-            | B::TeleLeft
-            | B::TeleRight
             | B::HoldPiece,
         ) => {}
     }
@@ -662,7 +665,7 @@ fn do_player_input(
     // See also (³).
 
     let updated_auto_move_scheduled = 'exp: {
-        let Some((is_moving_left, mut dir_active_since)) =
+        let Some((is_moving_left, dir_active_since)) =
             calc_is_moving_left_and_dir_active_since(updated_active_buttons)
         else {
             // No sensible movement information received.
@@ -671,8 +674,8 @@ fn do_player_input(
 
         let dx = if is_moving_left { -1 } else { 1 };
 
-        // Handle case where movement input was activated.
-        if let Some((rescheduleautomove, cancelautomove)) = computed_move_input_data {
+        // Handle case where movement-related input was handled.
+        if let Some((rescheduleautomove, cancelautomove)) = computed_auto_move_sentinels {
             if rescheduleautomove {
                 let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) else {
                     // Unable to move; Unschedule autonomous movement.
@@ -682,8 +685,6 @@ fn do_player_input(
                 // Actually do move.
                 if matches!(input, Input::Activate(_)) {
                     updated_piece = moved_piece;
-                } else {
-                    dir_active_since = input_time;
                 }
 
                 // Reschedule autonomous movement.
@@ -838,7 +839,7 @@ fn do_autonomous_move(
     // Move piece and update all appropriate piece-related values.
 
     let (updated_piece, updated_is_airborne, updated_auto_move_scheduled) = 'exp: {
-        let Some((move_is_left, dir_active_since)) =
+        let Some((move_is_left, move_dir_active_since)) =
             calc_is_moving_left_and_dir_active_since(&state.active_buttons)
         else {
             // No sensible movement information received.
@@ -858,7 +859,7 @@ fn do_autonomous_move(
                 config,
                 state,
                 auto_move_time,
-                dir_active_since,
+                move_dir_active_since,
                 !is_airborne,
             );
 
@@ -1184,6 +1185,15 @@ fn calc_updated_active_buttons(
             previous_active_buttons[button] = Some(input_time);
         }
         Input::Deactivate(button) => {
+            if matches!(input, Input::Deactivate(Button::MoveLeft))
+                && previous_active_buttons[Button::MoveRight].is_some()
+            {
+                previous_active_buttons[Button::MoveRight] = Some(input_time);
+            } else if matches!(input, Input::Deactivate(Button::MoveRight))
+                && previous_active_buttons[Button::MoveLeft].is_some()
+            {
+                previous_active_buttons[Button::MoveLeft] = Some(input_time);
+            }
             previous_active_buttons[button] = None;
         }
     }
@@ -1202,47 +1212,75 @@ fn check_piece_became_movable(
     moved_previous_piece.is_err() && moved_updated_piece.is_ok()
 }
 
-/// This function may return an integer = `-1` | `1` and a time at or after `move_time` for the next designated auto-move.
+/// This function may return
+/// 1. An bool which is `true` when movement is to the left (and `false` when to the right),
+/// 2. and an optional time at which the relevant 'move' direction button had been activated.
+///    This option is `None` if the move is caused by an intent to teleport instead.
+///
 /// It returns `None` when it cannot determine a direction to move to, which happens when:
 /// * Both directions were pressed at the exact same in-game time, or
 /// * No direction is pressed.
 fn calc_is_moving_left_and_dir_active_since(
     active_buttons: &ButtonsState,
-) -> Option<(bool, InGameTime)> {
-    Some(
-        match (
-            active_buttons[Button::MoveLeft],
-            active_buttons[Button::MoveRight],
-        ) {
-            (Some(time_actvd_left), Some(time_actvd_right)) => {
-                match time_actvd_left.cmp(&time_actvd_right) {
-                    // 'Right' was pressed more recently, go right.
-                    std::cmp::Ordering::Less => (false, time_actvd_right),
-                    // Both pressed at exact same time, don't move.
-                    std::cmp::Ordering::Equal => return None,
-                    // 'Left' was pressed more recently, go left.
-                    std::cmp::Ordering::Greater => (true, time_actvd_left),
-                }
+) -> Option<(bool, Option<InGameTime>)> {
+    match (
+        active_buttons[Button::TeleLeft],
+        active_buttons[Button::TeleRight],
+    ) {
+        (Some(time_actvd_left), Some(time_actvd_right)) => {
+            match time_actvd_left.cmp(&time_actvd_right) {
+                // 'Right' was pressed more recently, go right.
+                std::cmp::Ordering::Less => return Some((false, None)),
+                // Both pressed at exact same time, don't move.
+                std::cmp::Ordering::Equal => {}
+                // 'Left' was pressed more recently, go left.
+                std::cmp::Ordering::Greater => return Some((true, None)),
             }
-            // Only 'left' pressed.
-            (Some(time_prsd_left), None) => (true, time_prsd_left),
-            // Only 'right' pressed.
-            (None, Some(time_prsd_right)) => (false, time_prsd_right),
-            // None pressed. No movement.
-            (None, None) => return None,
-        },
-    )
+        }
+        // Only 'left' pressed.
+        (Some(_time_prsd_left), None) => return Some((true, None)),
+        // Only 'right' pressed.
+        (None, Some(_time_prsd_right)) => return Some((false, None)),
+        // None pressed. No movement.
+        (None, None) => {}
+    }
+
+    match (
+        active_buttons[Button::MoveLeft],
+        active_buttons[Button::MoveRight],
+    ) {
+        (Some(time_actvd_left), Some(time_actvd_right)) => {
+            match time_actvd_left.cmp(&time_actvd_right) {
+                // 'Right' was pressed more recently, go right.
+                std::cmp::Ordering::Less => Some((false, Some(time_actvd_right))),
+                // Both pressed at exact same time, don't move.
+                std::cmp::Ordering::Equal => None,
+                // 'Left' was pressed more recently, go left.
+                std::cmp::Ordering::Greater => Some((true, Some(time_actvd_left))),
+            }
+        }
+        // Only 'left' pressed.
+        (Some(time_prsd_left), None) => Some((true, Some(time_prsd_left))),
+        // Only 'right' pressed.
+        (None, Some(time_prsd_right)) => Some((false, Some(time_prsd_right))),
+        // None pressed. No movement.
+        (None, None) => None,
+    }
 }
 
 fn calc_next_auto_move_time(
     config: &Configuration,
     state: &State,
     current_time: InGameTime,
-    direction_active_since: InGameTime,
+    move_direction_active_since_and_otherwise_teleport: Option<InGameTime>,
     is_grounded: bool,
 ) -> InGameTime {
+    let Some(dir_active_since) = move_direction_active_since_and_otherwise_teleport else {
+        return current_time;
+    };
+
     let mut move_delay =
-        if current_time.saturating_sub(direction_active_since) >= config.delayed_auto_shift {
+        if current_time.saturating_sub(dir_active_since) >= config.delayed_auto_shift {
             config.auto_repeat_rate
         } else {
             config.delayed_auto_shift

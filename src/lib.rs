@@ -390,8 +390,8 @@ pub enum GameEndCause {
     // 'Top out' denotes a number of new lines being unable to enter the existing board.
     /// This is currently unused in the base engine.
     TopOut {
-        /// The offending lines that did not fit onto the existing board.
-        blocked_lines: Vec<Line>,
+        /// The lines that got pushed out and did not fit on the board anymore.
+        top_lines: Vec<Line>,
     },
     /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
@@ -1125,10 +1125,9 @@ impl std::fmt::Display for UpdateGameError {
 
 impl std::error::Error for UpdateGameError {}
 
-/// Adds an offset to a coordinate, failing if the result overflows
-/// (negative or positive).
+/// Adds an offset to a coordinate, wrapping on overflow.
 pub fn add((x, y): Coord, (dx, dy): CoordOffset) -> Coord {
-    (x + dx, y + dy)
+    (x.wrapping_add(dx), y.wrapping_add(dy))
 }
 
 /*#[cfg(test)]

@@ -362,7 +362,6 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
         piece_v1_raw.fits_onto(&state.board).then_some(piece_v1_raw)
     };
 
-    // Try finding `Some` valid spawn piece from the provided options in order.
     let Some(piece_v3_ready) = piece_v2_rot else {
         // Otherwise BlockOut
         let blocked_piece = if config.allow_initial_actions {

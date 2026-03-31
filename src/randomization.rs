@@ -7,8 +7,7 @@ use std::num::NonZeroU32;
 use rand::{
     self,
     distr::{weighted::WeightedIndex, Distribution},
-    //prelude::SliceRandom, // vec.shuffle(rng)...
-    Rng,
+    Rng, RngExt,
 };
 
 use crate::{ExtNonNegF64, Tetromino};

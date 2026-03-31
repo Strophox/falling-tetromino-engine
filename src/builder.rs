@@ -2,6 +2,8 @@
 This module handles creation / initialization / building of [`Game`]s.
  */
 
+use rand::Rng;
+
 use crate::modding::Hook;
 
 use super::*;
@@ -36,9 +38,7 @@ impl GameBuilder {
 
     /// Creates a [`Game`] with the information specified by `self` and some one-time `modifiers`.
     pub fn build_modded(&self, modifiers: Vec<Box<dyn GameModifier>>) -> Game {
-        let seed = self
-            .seed
-            .unwrap_or_else(|| rand::RngCore::next_u64(&mut rand::rng()));
+        let seed = self.seed.unwrap_or_else(|| rand::rng().next_u64());
         let tetromino_generator = self.tetromino_generator;
         let config = self.config.clone();
 

@@ -50,12 +50,12 @@ Fundamental points to note:
 Internally, the game processes a pure timeline like so:
 ```
 Piece spawns              e.g. Game state viewed here
-┊        Piece falls                  ┊
-┊        ┊       Piece falls          ┊
-↓        ↓       ↓                    v
-├────────¦──|────¦───────¦───────¦───────¦────╌┄┈>
-            ↑
-            ┊
+|        Piece falls                  |
+|        |       Piece falls          |
+v        v       v                    v
+|--------¦--|----¦-------¦-------¦----+--¦------->
+            ^
+            |
             "RotateLeft" player input:
              Piece rotates
 ```

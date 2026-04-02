@@ -77,11 +77,11 @@ A current point of investigation remain the ergonomics of engine hooks for moddi
 The engine aims to compete on the order of modern tetromino stackers;
 It should incorporate many mechanics desired by familiar/experienced players, such as:
 - Available player actions:
-    - Move left/right,
-    - Rotate left/right/180°
-    - Drop soft/hard
-    - Teleport down(='Sonic drop')/left/right
-    - Hold piece,
+    - **Move** left/right,
+    - **Rotate** left/right/180°
+    - **Drop** soft/hard
+    - **Teleport** down(='Sonic drop') and left/right
+    - **Hold** piece,
 - **Tetromino randomizers**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balance-out',
 - **Piece preview** (arbitrary size),
 - **Spawn delay** (ARE),
@@ -90,7 +90,7 @@ It should incorporate many mechanics desired by familiar/experienced players, su
 - **Delayed auto-move** (DAS),
 - **Auto-move rate** (ARR),
 - **Soft drop factor** (SDF),
-- **Customizable gravity/fall and lock delay curves** (including '20G' = 0s fall delay),
+- **Customizable gravity/fall and lock delay curves** (exponential and/or linear; also, '20G' (fall rate of ≥1200 Hz) just becomes ≤00083s fall delay),
 - **Ensure move delay less than lock delay** toggle (i.e. DAS/ARR are automatically shortened when lock delay is very low),
 - **Allow lenient lock-reset** toggle (i.e. reset lock delay even if rotate/move fails),
 - **Lock-reset cap factor** (i.e. maximum time before lock delay cannot be reset),

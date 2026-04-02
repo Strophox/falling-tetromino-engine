@@ -9,29 +9,24 @@ mechanics.
 ```
 use falling_tetromino_engine::*;
 
-// Starting up a game - note that in-game time starts at 0s.
+// Initialize a game. In-game time starts at 0s.
 let mut game = Game::builder()
     .seed(1234)
-    /* ...Further optional configuration possible... */
+    /* Further customization possible here. */
     .build();
 
-// Updating the game with the info that 'left' should be pressed at second 4.2;
-// If a piece is in the game, it will try to move left.
+// Update the game with info that 'left' is activated at second 4.2 (i.e. piece starts moving left).
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs_f64(4.2), Some(input));
+game.update(InGameTime::from_secs(4.2), Some(input));
 
-// ...
+// Update the game with info that no input changes up to second 6.79 (e.g. piece falls).
+game.update(InGameTime::from_secs(6.79), None);
 
-// Updating the game with the info that no input change has occurred up to second 6.79;
-// This updates the game, e.g., pieces fall and lock.
-game.update(InGameTime::from_secs_f64(13.37), None);
-
-// Read most recent game state;
-// This is how a UI can know how to render the board, etc.
+// Read game state (for rendering etc.)
 let State { board, .. } = game.state();
 ```
 
-[FIXME: Document *all* features in detail (including IRS, etc., cargo feature `serde` etc.).]
+[[FIXME: Current documentation is lacking and sometimes slightly outdated. *All* features should be commented in detail (including IRS, etc., cargo feature `serde` etc.)]]
 */
 
 #![warn(missing_docs)]
@@ -327,7 +322,11 @@ pub enum Button {
     HoldPiece,
 }
 
-/// A change in button state, between being held down or unpressed.
+/// A signal about button activation or deactivation.
+///
+/// `Activate` generally corresponds to a 'press down' input, whereas `Deactivate` is 'release'.
+///
+/// Note however that a button is allowed to be activated several times in sequence with only a single deactivation.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Input {

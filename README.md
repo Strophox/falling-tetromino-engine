@@ -40,24 +40,35 @@ game.update(InGameTime::from_secs(6.79), None);
 let State { board, .. } = game.state();
 ```
 
-Internally, the game processes a pure timeline like so:
-```
-    0s - Game start, spawn piece.
-   /        4.2s - Player input, start moving piece.
-  /        /            6.79s - (Piece has moved left more,
- /        /            /        fallen due to gravity etc.)
-[--------|---------------------------- - - - ->
-```
-
 
 ## Features Overview
 
-- The engine is frontend-agnostic (i.e. only implements the game logic and by itself does not prescribe how to interact with the real world, does not know about frames, the keyboard etc.).
-- Depending on configuration, calls to `Game::update` and `Game::forfeit` can return additional information (`Notification`) which can facilitate frontend implementation (e.g. hard drop and other visual effects).
-- The engine provides possibilities for compile-time modding. Mods may arbitrarily access and modify game state when called on given engine hooks.
+Fundamental points to note:
+- The engine implements the pure game logic/backend, i.e. it accurately and only simulates a virtual board with tetromino pieces spawning/moving/locking, lines clearing etc. 
+- The engine is frontend-agnostic and by itself does not prescribe how to interact with the real world player (it does not know about the keyboard, refresh-/framerate etc.)
 
-The engine aims to compare to other modern tetromino stackers in terms of usability.
-It should already incorporate many mechanics desired by familiar/experienced players, such as:
+Internally, the game processes a pure timeline like so:
+```
+Piece spawns              e.g. Game state viewed here
+┊        Piece falls                  ┊
+┊        ┊       Piece falls          ┊
+↓        ↓       ↓                    v
+├────────¦──|────¦───────¦───────¦───────¦────╌┄┈>
+            ↑
+            ┊
+            "RotateLeft" player input:
+             Piece rotates
+```
+I.e. running a game at 60 Hz just means that `Game::update` is called 60 times in one second to determine the state in the timeline and show it.
+(The precision used internally is currently based on [`std::time::Duration`](<https://doc.rust-lang.org/std/time/struct.Duration.html>) which goes down to nanoseconds.)
+
+Depending on configuration, calls to `Game::update` and `Game::forfeit` can return additional information (`Notification`) which can facilitate frontend implementation (e.g. hard drop, piece lock, line clears and other visual feedback).
+
+The engine provides possibilities for compile-time modding.
+Mods may arbitrarily access and modify game state when called on given engine hooks.
+
+In terms of advanced game mechanics the engine aims to compare with other modern tetromino stackers.
+It should already incorporate many features desired by familiar/experienced players, such as:
 - Available player actions:
     - **Move** left/right,
     - **Rotate** left/right/180°
@@ -78,10 +89,11 @@ It should already incorporate many mechanics desired by familiar/experienced pla
 - **Lock-reset cap factor** (i.e. maximum time before lock delay cannot be reset),
 - **Line clear duration** (LCD),
 - **Customizable win/loss conditions** based on the time, pieces, lines, points,
-- Score more **points** for larger lineclears and spins ('allspin'),
-- Game **reproducibility** (PRNG).
+- Score more **points** for larger lineclears, spins ('allspin'), perfect clear, combo,
+- Game **reproducibility** (PRNG/determinism).
 
-Ongoing areas of investigation are
+The basics seem to have been figured out through many iterative improvements.
+Ongoing areas of investigation (to improve generalization) are:
 - Choice of `Notification`s provided to frontend clients;
 - Choice of update `Hook`s for modding clients;
 - Choice of `Stat`s to query game with or make game automatically halt;
@@ -239,8 +251,8 @@ enum Notification {
         line_clear_duration: InGameTime,
     },
     HardDrop {
-        previous_piece: Piece,
-        updated_piece: Piece,
+        height_dropped: usize,
+        dropped_piece: Piece,
     },
     Accolade {
         points_bonus: u32,

@@ -28,7 +28,8 @@ let State { board, .. } = game.state();
 
 [[FIXME: Current documentation is lacking and sometimes slightly outdated. *All* features should be commented in detail (including IRS, etc., cargo feature `serde` etc.)]]
 */
-
+#![doc(html_logo_url = "https://github.com/Strophox/tetro-tui/blob/3d98435167c779cb57651383d6b290d31e015013/demo_assets/tetromino_logo_glow.png?raw=true")]
+#![doc(html_favicon_url = "https://github.com/Strophox/tetro-tui/blob/3d98435167c779cb57651383d6b290d31e015013/demo_assets/tetromino_logo_glow.png?raw=true")]
 #![warn(missing_docs)]
 
 mod builder;

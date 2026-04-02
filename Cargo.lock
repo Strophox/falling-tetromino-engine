@@ -48,7 +48,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "falling-tetromino-engine"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "rand",
  "rand_chacha",

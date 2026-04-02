@@ -9,9 +9,9 @@ A tetromino stacker engine in Rust, with the goals of being featureful, efficien
 
 ## Installation
 
-Do `cargo add falling-tetromino-engine`.
+Run `cargo add falling-tetromino-engine`.
 
-Most engine types support use with [`serde`](https://crates.io/crates/serde):
+Most engine types support Serialization through [`serde`](https://crates.io/crates/serde), available with the corresponding feature flag:
 ```toml
 [dependencies]
 falling-tetromino-engine = { version = "1.0.0", features = ["serde"] }
@@ -54,18 +54,16 @@ Internally, the game processes a pure timeline like so:
 
 The game keeps:
 - **Configuration** to read from, which determines game behavior.
-- **State values** which persists throughout the game's lifetime.
-- Dedicated and separate **'phase'-state** field.
-    - It represents a state machine and can store values specific to each separate stage during the game
-    - E.g., 'spawning' (no piece) vs. 'piece is in play' (with data to keep track of).
+- **State values** which persist throughout the game.
+- A dedicated **'phase'**-state field:
+    - This represents the macro-scale state machine and can store values specific to separate stages during the game.
+    - E.g., 'Spawning' (no piece) vs. 'Piece-is-in-play' (with piece data to keep track of).
 
-During each update, the game looks at the (very limited) number of upcoming in-game events and processes them.
-The only complicated phase is `Phase::PieceInPlay { .. }`, the only where there can be several upcoming events (priority in the given order):
+During each update, the game looks at the (very limited) number of upcoming in-game 'events' and processes them.
+The only complicated phase is `Phase::PieceInPlay { .. }`, which encapsulates several types of upcoming events (priority in the given order):
 - **Action by player**: Player input which causes e.g. the piece to move, makes it lock immediately or cancels auto-movement.
-- **Autonomous movement**: While player holds down move buttons, the piece should move autonomously.
+- **Autonomous movement**: While move buttons are active ('held down'), the piece may move autonomously.
 - **Falling *or* locking**: Whenever the piece is airborne *or* grounded, there is an upcoming fall *or* lock scheduled.
-
-A current point of investigation remain the ergonomics of engine hooks for modding.
 
 
 ## Features Overview
@@ -98,6 +96,12 @@ It should incorporate many mechanics desired by familiar/experienced players, su
 - **Customizable win/loss conditions** based on the time, pieces, lines, score,
 - Higher **score** for larger lineclears and spins ('allspin'),
 - Game **reproducibility** (PRNG).
+
+Ongoing areas of investigation are
+- Choice of `Notification`s provided to frontend clients;
+- Choice of update `Hook`s for modding clients;
+- Choice of `Stat`s to query game with or make game automatically halt;
+- Various engine generalizations for engine clients that want to plug custom behavior for currently-hardcoded structures.
 
 
 ## Features and Implementation Overview by Type definitions and API

@@ -599,8 +599,11 @@ fn do_player_input(
             if config.notification_level != NotificationLevel::Silent {
                 feed.push((
                     Notification::HardDrop {
-                        previous_piece,
-                        updated_piece,
+                        height_dropped: previous_piece
+                            .position
+                            .1
+                            .abs_diff(updated_piece.position.1),
+                        dropped_piece: updated_piece,
                     },
                     input_time,
                 ));

@@ -495,9 +495,9 @@ pub enum Notification {
     /// A piece was quickly dropped from its original position to a new one.
     HardDrop {
         /// Information about the old state of the hard-dropped piece.
-        previous_piece: Piece,
+        height_dropped: usize,
         /// Information about the new state of the hard-dropped piece.
-        updated_piece: Piece,
+        dropped_piece: Piece,
     },
     /// The player cleared some lines with a number of other stats that might have increased their
     /// score bonus.

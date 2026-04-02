@@ -1052,9 +1052,9 @@ fn do_lock(
     }
 
     // Locking.
-    for ((x, y), tile_type_id) in piece.tiles() {
+    for ((x, y), tile_id) in piece.tiles() {
         // Put tile into board.
-        state.board[y as usize][x as usize] = Some(tile_type_id);
+        state.board[y as usize][x as usize] = Some(tile_id);
     }
 
     if config.notification_level != NotificationLevel::Silent {

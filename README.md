@@ -172,7 +172,7 @@ struct State {
     piece_generator: TetrominoGenerator,
     piece_preview: VecDeque<Tetromino>,
     piece_held: Option<(Tetromino, bool)>,
-    board: [[Option<TileTypeID>; Game::WIDTH]; Game::HEIGHT],
+    board: [[Option<TileID>; Game::WIDTH]; Game::HEIGHT],
     fall_delay: ExtDuration,
     fall_delay_lowerbound_hit_at_n_lineclears: Option<u32>,
     lock_delay: ExtDuration,

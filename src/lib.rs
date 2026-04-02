@@ -51,9 +51,9 @@ pub use randomization::TetrominoGenerator;
 pub use rotation::RotationSystem;
 
 /// Abstract identifier for which type of tile occupies a cell in the grid.
-pub type TileTypeID = NonZeroU8;
+pub type TileID = NonZeroU8;
 /// The type of horizontal lines of the playing grid.
-pub type Line = [Option<TileTypeID>; Game::WIDTH];
+pub type Line = [Option<TileID>; Game::WIDTH];
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 /// The type of the entire two-dimensional playing grid.
 pub type Board = [Line; Game::HEIGHT];
@@ -606,7 +606,7 @@ impl Tetromino {
     }
 
     /// Returns the convened-on standard tile id corresponding to the given tetromino.
-    pub const fn tiletypeid(self) -> TileTypeID {
+    pub const fn tile_id(self) -> TileID {
         use Tetromino::*;
         let u8 = match self {
             O => 1,
@@ -641,16 +641,16 @@ impl Orientation {
 
 impl Piece {
     /// Returns the coordinates and tile types for he piece on the board.
-    pub fn tiles(&self) -> [(Coord, TileTypeID); 4] {
+    pub fn tiles(&self) -> [(Coord, TileID); 4] {
         let Self {
             tetromino,
             orientation,
             position: (x, y),
         } = self;
-        let tile_type_id = tetromino.tiletypeid();
+        let tile_id = tetromino.tile_id();
         tetromino
             .minos(*orientation)
-            .map(|(dx, dy)| ((x + dx, y + dy), tile_type_id))
+            .map(|(dx, dy)| ((x + dx, y + dy), tile_id))
     }
 
     /// Checks whether the piece fits at its current location onto the board.

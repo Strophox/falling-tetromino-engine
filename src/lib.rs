@@ -17,10 +17,10 @@ let mut game = Game::builder()
 
 // Update the game with info that 'left' is activated at second 4.2 (i.e. piece starts moving left).
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs(4.2), Some(input));
+game.update(InGameTime::from_secs_f64(4.2), Some(input));
 
 // Update the game with info that no input changes up to second 6.79 (e.g. piece falls).
-game.update(InGameTime::from_secs(6.79), None);
+game.update(InGameTime::from_secs_f64(6.79), None);
 
 // Read game state (for rendering etc.)
 let State { board, .. } = game.state();
@@ -28,8 +28,8 @@ let State { board, .. } = game.state();
 
 [[FIXME: Current documentation is lacking and sometimes slightly outdated. *All* features should be commented in detail (including IRS, etc., cargo feature `serde` etc.)]]
 */
-#![doc(html_logo_url = "https://github.com/Strophox/tetro-tui/blob/3d98435167c779cb57651383d6b290d31e015013/demo_assets/tetromino_logo_glow.png?raw=true")]
-#![doc(html_favicon_url = "https://github.com/Strophox/tetro-tui/blob/3d98435167c779cb57651383d6b290d31e015013/demo_assets/tetromino_logo_glow.png?raw=true")]
+#![doc(html_logo_url = "https://github.com/Strophox/tetro-tui/blob/6baf0f4ed1a294400b66761ea5efebe1d207ffe6/demo_assets/tetromino_logo_glow.png?raw=true")]
+#![doc(html_favicon_url = "https://github.com/Strophox/tetro-tui/blob/6baf0f4ed1a294400b66761ea5efebe1d207ffe6/demo_assets/tetromino_logo_glow.png?raw=true")]
 #![warn(missing_docs)]
 
 mod builder;

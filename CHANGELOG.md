@@ -11,11 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
 
+## [2.0.0] - 2026-04-02
+
+### Added
+- `Tetromino::piece_spawn_state`.
+
+### Changed
+- DAS now (correctly) applies on every direction change.
+    * E.g., holding both directions and then releasing the current one applies DAS into opposite direction before ARR starts.
+- Holding any of the `Button::Teleport*` variants now correctly keeps piece teleporting in that direction.
+    * I.e. `TeleportDown` is now closer to "`SoftDrop` + SDF=∞" than it is to "`HardDrop` + no piece lock".
+- Slight but breaking changes in public fields and types.
+    * `blocked_lines -> top_lines`
+    * `previous_piece`,`updated_piece` -> `height_dropped`,`dropped_piece`
+    * `TileTypeID`,`tiletypeid` -> `TileID`,`tile_id`
+    * `score_bonus` -> `points_bonus`
+
+### Fixed
+- `TetrominoGenerator::Stock` is now correctly implemented to simulate a random bag.
+    * Instead of choosing uniformly among *tetromino types remaining*, which leads to biased picks in extreme bags.
+
+
 ## [1.5.0] - 2026-03-25
 
 ### Changed
 - Minor internal changes to engine.
-    * Notably, score bonus is applied after lines clear, not on lock.
+    * Notably, points bonus is applied after lines clear, not on lock.
 
 ### Fixed
 - Bug where game limited by pieces would only end on lineclear, not lock.
@@ -108,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial release
-- Game implementation, notably with update method
+    * Game implementation (notably engine type definitions and `Game::update`) split off and transferred to here from main proof-of-concept frontend.
 
 ### Changed
 -

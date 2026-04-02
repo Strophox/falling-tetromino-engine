@@ -105,13 +105,13 @@ impl Game {
                 // Move on to spawning.
                 Phase::LinesClearing {
                     clear_finish_time,
-                    score_bonus,
+                    points_bonus,
                 } if clear_finish_time <= target_time => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::LinesClearPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
-                    self.state.points += score_bonus;
+                    self.state.points += points_bonus;
                     self.state.time = clear_finish_time;
                     self.run_mods(Hook::LinesClearPost, &mut feed);
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
@@ -1029,7 +1029,7 @@ fn do_lock(
     feed: &mut NotificationFeed,
 ) -> Phase {
     // Before board is changed, precompute whether a piece was 'spun' into position;
-    // - 'Spun' pieces give higher score bonus.
+    // - 'Spun' pieces give higher points bonus.
     // - Only locked pieces can yield bonus (i.e. can't possibly move down).
     // - Only locked pieces clearing lines can yield bonus (i.e. can't possibly move left/right).
     // Thus, if a piece cannot move back up at lock time, it must have gotten there by rotation.
@@ -1069,7 +1069,7 @@ fn do_lock(
         *swap_allowed = true;
     }
 
-    // Score bonus calculation.
+    // Points bonus calculation.
 
     // Find lines which might get cleared by piece locking. (actual clearing done later).
     let mut cleared_y_coords = Vec::<usize>::with_capacity(4);
@@ -1082,7 +1082,7 @@ fn do_lock(
     let lineclears = u32::try_from(cleared_y_coords.len()).unwrap();
 
     if lineclears == 0 {
-        // If no lines cleared, no score bonus and combo is reset.
+        // If no lines cleared, no points bonus and combo is reset.
         state.consecutive_line_clears = 0;
 
         // 'Update' ActionState;
@@ -1103,8 +1103,8 @@ fn do_lock(
         line.iter().all(|tile| tile.is_none()) || line.iter().all(|tile| tile.is_some())
     });
 
-    // Compute main Score Bonus.
-    let score_bonus =
+    // Compute main Points Bonus.
+    let points_bonus =
         lineclears * if is_spin { 2 } else { 1 } * if is_perfect_clear { 4 } else { 1 } * 2 - 1
             + (combo - 1);
 
@@ -1119,7 +1119,7 @@ fn do_lock(
 
         feed.push((
             Notification::Accolade {
-                score_bonus,
+                points_bonus,
                 tetromino: piece.tetromino,
                 is_spin,
                 lineclears,
@@ -1134,7 +1134,7 @@ fn do_lock(
     // Lines must be cleared, enter line clearing state.
     Phase::LinesClearing {
         clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
-        score_bonus,
+        points_bonus,
     }
 }
 

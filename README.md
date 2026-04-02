@@ -14,7 +14,7 @@ Run `cargo add falling-tetromino-engine`.
 Most engine types support Serialization through [`serde`](https://crates.io/crates/serde), available with the corresponding feature flag:
 ```toml
 [dependencies]
-falling-tetromino-engine = { version = "1.0.0", features = ["serde"] }
+falling-tetromino-engine = { version = "X.Y.Z", features = ["serde"] }
 ```
 
 
@@ -93,8 +93,8 @@ It should incorporate many mechanics desired by familiar/experienced players, su
 - **Allow lenient lock-reset** toggle (i.e. reset lock delay even if rotate/move fails),
 - **Lock-reset cap factor** (i.e. maximum time before lock delay cannot be reset),
 - **Line clear duration** (LCD),
-- **Customizable win/loss conditions** based on the time, pieces, lines, score,
-- Higher **score** for larger lineclears and spins ('allspin'),
+- **Customizable win/loss conditions** based on the time, pieces, lines, points,
+- Score more **points** for larger lineclears and spins ('allspin'),
 - Game **reproducibility** (PRNG).
 
 Ongoing areas of investigation are
@@ -116,14 +116,17 @@ See also [full documentation](https://docs.rs/falling-tetromino-engine).
 struct Game {
     // May be modified by user, will not be modified by Game.
     config: Configuration,
+
     // Cannot be modified, basic data used for reproducibility.
     state_init: StateInitialization,
+
     // Cannot be modified by user, used by Game.
     state: State,
     // Cannot be modified by user, used by Game.
     phase: Phase,
+
     // Modding.
-    modifiers: Vec<Modifier>,
+    modifiers: Vec<Box<dyn GameModifier>>,
 }
 
 impl Game {
@@ -167,7 +170,7 @@ struct StateInitialization {
 
 struct State {
     time: InGameTime,
-    buttons_pressed: [Option<InGameTime>; Button::VARIANTS.len()],
+    active_buttons: [Option<InGameTime>; Button::VARIANTS.len()],
     rng: GameRng,
     piece_generator: TetrominoGenerator,
     piece_preview: VecDeque<Tetromino>,
@@ -179,7 +182,7 @@ struct State {
     pieces_locked: [u32; Tetromino::VARIANTS.len()],
     lineclears: u32,
     consecutive_line_clears: u32,
-    score: u32,
+    points: u32,
 }
 
 enum Phase {
@@ -191,7 +194,7 @@ enum Phase {
         lock_time_cap: InGameTime,
         lowest_y: isize,
     },
-    LinesClearing { clear_finish_time: InGameTime, score_bonus: u32 },
+    LinesClearing { clear_finish_time: InGameTime, points_bonus: u32 },
     GameEnd { cause: GameEndCause, is_win: bool },
 }
 ```
@@ -240,7 +243,7 @@ enum Notification {
         updated_piece: Piece,
     },
     Accolade {
-        score_bonus: u32,
+        points_bonus: u32,
         lineclears: u32,
         combo: u32,
         is_spin: bool,

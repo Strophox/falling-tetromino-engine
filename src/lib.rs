@@ -366,7 +366,7 @@ pub struct State {
     pub lineclears: u32,
     /// The number of consecutive pieces that have been played and caused a line clear.
     pub consecutive_line_clears: u32,
-    /// The current total score the player has achieved in this round of play.
+    /// The current total points the player has scored in this game.
     pub points: u32,
 }
 
@@ -435,7 +435,7 @@ pub enum Phase {
         /// The in-game time at which the game moves on to the next `Phase.`
         clear_finish_time: InGameTime,
         /// The score bonus that will be earned once the lines are cleared out.
-        score_bonus: u32,
+        points_bonus: u32,
     },
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
@@ -500,10 +500,10 @@ pub enum Notification {
         dropped_piece: Piece,
     },
     /// The player cleared some lines with a number of other stats that might have increased their
-    /// score bonus.
+    /// points bonus.
     Accolade {
         /// The final computed score bonus caused by the action.
-        score_bonus: u32,
+        points_bonus: u32,
         /// How many lines were cleared by the piece simultaneously
         lineclears: u32,
         /// The number of consecutive pieces played that caused a lineclear.

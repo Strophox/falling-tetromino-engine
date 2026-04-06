@@ -7,6 +7,46 @@ use crate::modding::Hook;
 use super::*;
 
 impl Game {
+    /// Retrieve the when the next *autonomous* in-game update is scheduled.
+    /// I.e., compute the next time the game would change state assuming no button updates
+    ///
+    /// Returns `None` when game ended.
+    ///
+    /// # Modifiers
+    /// Note that this only predicts what an unmodded game would do;
+    /// [`Modifier`]s may arbitrarily change game state and change or prevent precise update predictions.
+    pub fn peek_next_update_time(&self) -> Option<InGameTime> {
+        // Find the next autonomous game update.
+        let mut update_time = match self.phase {
+            Phase::GameEnd { .. } => return None,
+            Phase::LinesClearing {
+                clear_finish_time, ..
+            } => clear_finish_time,
+            Phase::Spawning { spawn_time } => spawn_time,
+            Phase::PieceInPlay {
+                autoshift_scheduled,
+                fall_or_lock_time,
+                ..
+            } => 'exp: {
+                if let Some(autoshift_time) = autoshift_scheduled {
+                    if autoshift_time < fall_or_lock_time {
+                        break 'exp autoshift_time;
+                    }
+                }
+                fall_or_lock_time
+            }
+        };
+
+        // Check against time-related end conditions.
+        if let Some((time_limit, _)) = self.config.game_limits.time_elapsed {
+            if time_limit < update_time {
+                update_time = time_limit;
+            }
+        }
+
+        Some(update_time)
+    }
+
     /// Immediately end a game by forfeiting the current round.
     ///
     /// This can be used so `game.has_ended()` returns true and prevents future
@@ -105,13 +145,13 @@ impl Game {
                 // Move on to spawning.
                 Phase::LinesClearing {
                     clear_finish_time,
-                    points_bonus,
+                    point_bonus,
                 } if clear_finish_time <= target_time => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::LinesClearPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
-                    self.state.points += points_bonus;
+                    self.state.points += point_bonus;
                     self.state.time = clear_finish_time;
                     self.run_mods(Hook::LinesClearPost, &mut feed);
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
@@ -154,14 +194,14 @@ impl Game {
                 // Piece being manipulated by player.
                 Phase::PieceInPlay {
                     piece,
-                    auto_move_scheduled,
+                    autoshift_scheduled,
                     fall_or_lock_time,
-                    lock_time_cap,
+                    lock_cap_time: lock_time_cap,
                     lowest_y,
                 } if player_input.is_some()
                     && target_time <= fall_or_lock_time
-                    && auto_move_scheduled
-                        .is_none_or(|auto_move_time| target_time <= auto_move_time) =>
+                    && autoshift_scheduled
+                        .is_none_or(|autoshift_time| target_time <= autoshift_time) =>
                 {
                     // SAFETY: `player_input.is_some()`.
                     let input = unsafe { player_input.take().unwrap_unchecked() };
@@ -174,7 +214,7 @@ impl Game {
                         &self.config,
                         &mut self.state,
                         piece,
-                        auto_move_scheduled,
+                        autoshift_scheduled,
                         fall_or_lock_time,
                         lock_time_cap,
                         lowest_y,
@@ -189,26 +229,26 @@ impl Game {
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
-                // Piece moving autonomously.
+                // Piece shifting autonomously.
                 Phase::PieceInPlay {
                     piece,
-                    auto_move_scheduled: Some(auto_move_time),
+                    autoshift_scheduled: Some(autoshift_time),
                     fall_or_lock_time,
-                    lock_time_cap,
+                    lock_cap_time,
                     lowest_y,
-                } if auto_move_time <= target_time && auto_move_time <= fall_or_lock_time => {
+                } if autoshift_time <= target_time && autoshift_time <= fall_or_lock_time => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::AutoMovePre(&mut target_time), &mut feed);
-                    self.phase = do_autonomous_move(
+                    self.phase = do_autonomous_shift(
                         &self.config,
                         &mut self.state,
                         piece,
-                        auto_move_time,
+                        autoshift_time,
                         fall_or_lock_time,
-                        lock_time_cap,
+                        lock_cap_time,
                         lowest_y,
                     );
-                    self.state.time = auto_move_time;
+                    self.state.time = autoshift_time;
                     self.run_mods(Hook::AutoMovePost, &mut feed);
                     self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
@@ -216,9 +256,9 @@ impl Game {
                 // Piece falling.
                 Phase::PieceInPlay {
                     piece,
-                    auto_move_scheduled,
+                    autoshift_scheduled,
                     fall_or_lock_time: fall_time,
-                    lock_time_cap,
+                    lock_cap_time,
                     lowest_y,
                 } if fall_time <= target_time && piece.is_airborne(&self.state.board) => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
@@ -227,9 +267,9 @@ impl Game {
                         &self.config,
                         &mut self.state,
                         piece,
-                        auto_move_scheduled,
+                        autoshift_scheduled,
                         fall_time,
-                        lock_time_cap,
+                        lock_cap_time,
                         lowest_y,
                     );
                     self.state.time = fall_time;
@@ -240,9 +280,9 @@ impl Game {
                 // Piece locking.
                 Phase::PieceInPlay {
                     piece,
-                    auto_move_scheduled: _,
+                    autoshift_scheduled: _,
                     fall_or_lock_time: lock_time,
-                    lock_time_cap: _,
+                    lock_cap_time: _,
                     lowest_y: _,
                 } if lock_time <= target_time => {
                     self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
@@ -309,20 +349,20 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     state.piece_preview.extend(
         state.piece_generator.with_rng(&mut state.rng).take(
             config
-                .piece_preview_count
+                .generate_piece_preview
                 .saturating_sub(state.piece_preview.len()),
         ),
     );
 
     // "Initial Hold" system.
-    if active_hld && config.allow_initial_actions {
+    if active_hld && config.allow_spawn_actions {
         if let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time) {
             return next_phase;
         }
     }
 
     // 'Raw' spawn piece, before remaining prespawn_actions are applied.
-    let piece_v1_raw = next_tetromino.piece_spawn_state();
+    let piece_v1_raw = next_tetromino.spawn_piece();
 
     // "Initial Rotation" system.
 
@@ -354,7 +394,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     */
 
     // Optionally apply rotation to spawn piece.
-    let piece_v2_rot = if config.allow_initial_actions {
+    let piece_v2_rot = if config.allow_spawn_actions {
         config
             .rotation_system
             .rotate(&piece_v1_raw, &state.board, turns)
@@ -364,7 +404,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     let Some(piece_v3_ready) = piece_v2_rot else {
         // Otherwise BlockOut
-        let blocked_piece = if config.allow_initial_actions {
+        let blocked_piece = if config.allow_spawn_actions {
             match config
                 .rotation_system
                 .rotate(&piece_v1_raw, &Board::default(), turns)
@@ -397,7 +437,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     let lowest_y = piece_v3_ready.position.1;
 
     // Piece just spawned, standard full lock time max.
-    let lock_time_cap = spawn_time.saturating_add(
+    let lock_cap_time = spawn_time.saturating_add(
         state
             .lock_delay
             .mul_ennf64(config.lock_reset_cap_factor)
@@ -406,7 +446,7 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     // Schedule immediate move after spawning, if any move button held.
     // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
-    let auto_move_scheduled = if active_movlf || active_movrt || active_tellf || active_telrt {
+    let autoshift_scheduled = if active_movlf || active_movrt || active_tellf || active_telrt {
         Some(spawn_time)
     } else {
         None
@@ -414,9 +454,9 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 
     Phase::PieceInPlay {
         piece: piece_v3_ready,
-        auto_move_scheduled,
+        autoshift_scheduled,
         fall_or_lock_time,
-        lock_time_cap,
+        lock_cap_time,
         lowest_y,
     }
 }
@@ -426,9 +466,9 @@ fn do_player_input(
     config: &Configuration,
     state: &mut State,
     previous_piece: Piece,
-    previous_auto_move_scheduled: Option<InGameTime>,
+    previous_autoshift_scheduled: Option<InGameTime>,
     previous_fall_or_lock_time: InGameTime,
-    previous_lock_time_cap: InGameTime,
+    previous_lock_cap_time: InGameTime,
     previous_lowest_y: isize,
     input: Input,
     input_time: InGameTime,
@@ -544,7 +584,7 @@ fn do_player_input(
     */
 
     // Prepare to maybe change the move_scheduled.
-    let mut computed_auto_move_sentinels: Option<(bool, bool)> = None;
+    let mut autoshift_sentinel: Option<bool> = None;
 
     let mut updated_piece = previous_piece;
     use {Button as B, Input as I};
@@ -622,30 +662,46 @@ fn do_player_input(
         // Movement.
         // This is relatively complicated; The logic is based on the comment in (³).
         I::Activate(B::MoveLeft | B::MoveRight) | I::Deactivate(B::MoveLeft | B::MoveRight) => {
+            // Actually move piece.
+            if let Input::Activate(button) = input {
+                let dx = if matches!(button, Button::MoveLeft) {
+                    -1
+                } else {
+                    1
+                };
+                if let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) {
+                    updated_piece = moved_piece;
+                }
+            }
+
             let prev_l = state.active_buttons[B::MoveLeft];
             let prev_r = state.active_buttons[B::MoveRight];
             let (l, r) = (prev_l.is_some(), prev_r.is_some());
 
             // *Setting auto-move time* (alt): !(Deact_L !L>=R || Deact_R !L=<R)
-            let rescheduleautomove = {
+            let reschedule_autoshift = {
                 let a = matches!(input, I::Deactivate(B::MoveLeft)) && !(r && prev_l >= prev_r);
                 let b = matches!(input, I::Deactivate(B::MoveRight)) && !(l && prev_l <= prev_r);
                 !(a || b)
             };
 
+            // FIXME: Abandoned code.
             // *Canceling auto-move time*: L r Deact_l  ||  r L Deact_L
-            let cancelautomove = {
-                let a = l && !r && matches!(input, I::Deactivate(B::MoveLeft));
-                let b = !l && r && matches!(input, I::Deactivate(B::MoveRight));
-                a || b
-            };
+            // let cancel_autoshift = {
+            //     let a = l && !r && matches!(input, I::Deactivate(B::MoveLeft));
+            //     let b = !l && r && matches!(input, I::Deactivate(B::MoveRight));
+            //     a || b
+            // };
 
-            computed_auto_move_sentinels = Some((rescheduleautomove, cancelautomove));
+            autoshift_sentinel = Some(reschedule_autoshift);
         }
 
         I::Deactivate(B::TeleLeft | B::TeleRight) => {
-            // FIXME: This is necessary to handle niche cases. E.g., try pressing in order with 0msARR: ML, MR, TL, TR.
-            computed_auto_move_sentinels = Some((true, false));
+            // FIXME: This is necessary to handle niche cases. E.g., try pressing the following, in order (under 0msARR): ML, MR, TL, TR.
+            let reschedule_autoshift = true;
+            // FIXME: Abandoned code.
+            // let cancel_autoshift = false;
+            autoshift_sentinel = Some(reschedule_autoshift);
         }
 
         // Various button releases.
@@ -666,63 +722,64 @@ fn do_player_input(
     // Update movetimer and rest of movement stuff.
     // See also (³).
 
-    let updated_auto_move_scheduled = 'exp: {
-        let Some((is_moving_left, dir_active_since)) =
-            calc_is_moving_left_and_dir_active_since(updated_active_buttons)
+    let updated_autoshift_scheduled = 'exp: {
+        let Some((is_shifting_left, dir_active_since, is_teleport)) =
+            calc_isleftshift_activesince_isteleport(updated_active_buttons)
         else {
             // No sensible movement information received.
             break 'exp None;
         };
 
-        let dx = if is_moving_left { -1 } else { 1 };
-
         // Handle case where movement-related input was handled.
-        if let Some((rescheduleautomove, cancelautomove)) = computed_auto_move_sentinels {
-            if rescheduleautomove {
-                let Ok(moved_piece) = updated_piece.offset_on(&state.board, (dx, 0)) else {
-                    // Unable to move; Unschedule autonomous movement.
-                    break 'exp None;
-                };
-
-                // Actually do move.
-                if matches!(input, Input::Activate(_)) {
-                    updated_piece = moved_piece;
-                }
-
+        if let Some(reschedule_autoshift) = autoshift_sentinel {
+            if reschedule_autoshift {
                 // Reschedule autonomous movement.
                 let is_airborne = updated_piece.is_airborne(&state.board);
-                let auto_move_time = calc_next_auto_move_time(
+                let autoshift_time = calc_next_autoshift_time(
                     config,
                     state,
                     input_time,
                     dir_active_since,
+                    is_teleport,
                     is_airborne,
                 );
-                break 'exp Some(auto_move_time);
+                break 'exp Some(autoshift_time);
             }
 
-            if cancelautomove {
-                // Buttons deactivated; Cancel autonomous movement.
-                break 'exp None; // Buttons unpressed: Remove autonomous movement.
-            }
+            // FIXME: Abandoned code.
+            // if cancel_autoshift {
+            //     // Buttons deactivated; Cancel autonomous movement.
+            //     break 'exp None; // Buttons unpressed: Remove autonomous movement.
+            // }
 
             // No relevant movement changes caused by mvmt-related button input: Don't do anything.
-            break 'exp previous_auto_move_scheduled;
+            break 'exp previous_autoshift_scheduled;
         }
 
+        // Otherwise wasn't a move-related
+        let dx = if is_shifting_left { -1 } else { 1 };
         if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
+            let is_airborne = updated_piece.is_airborne(&state.board);
+            let autoshift_time = calc_next_autoshift_time(
+                config,
+                state,
+                input_time,
+                dir_active_since,
+                is_teleport,
+                is_airborne,
+            );
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
-            break 'exp Some(input_time);
+            break 'exp Some(autoshift_time);
         }
 
         // All checks passed, no changes need to be made.
         // This is the case where neither (³) or (⁴) apply.
-        previous_auto_move_scheduled
+        previous_autoshift_scheduled
     };
 
     // Update `lowest_y`, re-set `lock_time_cap` if applicable.
-    let (updated_lowest_y, updated_lock_time_cap) = if updated_piece.position.1 < previous_lowest_y
+    let (updated_lowest_y, updated_lock_cap_time) = if updated_piece.position.1 < previous_lowest_y
     {
         // Refresh position and lock_time_cap.
         (
@@ -735,7 +792,7 @@ fn do_player_input(
             ),
         )
     } else {
-        (previous_lowest_y, previous_lock_time_cap)
+        (previous_lowest_y, previous_lock_cap_time)
     };
 
     let previous_is_airborne = previous_piece.is_airborne(&state.board);
@@ -780,7 +837,7 @@ fn do_player_input(
             // On the ground - Refresh lock time if piece moved.
             // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
             input_time
-                .max(updated_lock_time_cap)
+                .max(updated_lock_cap_time)
                 .min(input_time.saturating_add(state.lock_delay.saturating_duration()))
         } else {
             // Previous lock time.
@@ -792,9 +849,9 @@ fn do_player_input(
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece: updated_piece,
-        auto_move_scheduled: updated_auto_move_scheduled,
+        autoshift_scheduled: updated_autoshift_scheduled,
         fall_or_lock_time: updated_fall_or_lock_time,
-        lock_time_cap: updated_lock_time_cap,
+        lock_cap_time: updated_lock_cap_time,
         lowest_y: updated_lowest_y,
     }
 }
@@ -829,20 +886,20 @@ fn try_do_hold(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_autonomous_move(
+fn do_autonomous_shift(
     config: &Configuration,
     state: &mut State,
     previous_piece: Piece,
-    auto_move_time: InGameTime,
+    autoshift_time: InGameTime,
     previous_fall_or_lock_time: InGameTime,
-    previous_lock_time_cap: InGameTime,
+    previous_lock_cap_time: InGameTime,
     previous_lowest_y: isize,
 ) -> Phase {
     // Move piece and update all appropriate piece-related values.
 
-    let (updated_piece, updated_is_airborne, updated_auto_move_scheduled) = 'exp: {
-        let Some((move_is_left, move_dir_active_since)) =
-            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
+    let (updated_piece, updated_is_airborne, updated_autoshift_scheduled) = 'exp: {
+        let Some((is_left_shift, dir_active_since, is_teleport)) =
+            calc_isleftshift_activesince_isteleport(&state.active_buttons)
         else {
             // No sensible movement information received.
             break 'exp (
@@ -852,20 +909,21 @@ fn do_autonomous_move(
             );
         };
 
-        let dx = if move_is_left { -1 } else { 1 };
+        let dx = if is_left_shift { -1 } else { 1 };
         if let Ok(moved_piece) = previous_piece.offset_on(&state.board, (dx, 0)) {
             let updated_piece = moved_piece;
             // Able to do relevant move; Insert autonomous movement.
             let is_airborne = updated_piece.is_airborne(&state.board);
-            let auto_move_time = calc_next_auto_move_time(
+            let autoshift_time = calc_next_autoshift_time(
                 config,
                 state,
-                auto_move_time,
-                move_dir_active_since,
-                !is_airborne,
+                autoshift_time,
+                dir_active_since,
+                is_teleport,
+                is_airborne,
             );
 
-            break 'exp (updated_piece, is_airborne, Some(auto_move_time));
+            break 'exp (updated_piece, is_airborne, Some(autoshift_time));
         }
 
         // Unable to move; Remove autonomous movement.
@@ -878,7 +936,7 @@ fn do_autonomous_move(
 
     // Horizontal move could not have affected height, so it stays the same!
     let updated_lowest_y = previous_lowest_y;
-    let updated_lock_time_cap = previous_lock_time_cap;
+    let updated_lock_cap_time = previous_lock_cap_time;
 
     let updated_fall_or_lock_time = if updated_is_airborne {
         // Calculate scheduled fall time. See (¹).
@@ -886,25 +944,25 @@ fn do_autonomous_move(
 
         if was_grounded {
             // Refresh fall timer if we *started* falling.
-            calc_next_fall_time(state, config, auto_move_time, &state.active_buttons)
+            calc_next_fall_time(state, config, autoshift_time, &state.active_buttons)
         } else {
             // Falling as before.
             previous_fall_or_lock_time
         }
     } else {
         // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
-        auto_move_time
-            .max(updated_lock_time_cap)
-            .min(auto_move_time.saturating_add(state.lock_delay.saturating_duration()))
+        autoshift_time
+            .max(updated_lock_cap_time)
+            .min(autoshift_time.saturating_add(state.lock_delay.saturating_duration()))
     };
 
     // Update 'ActionState';
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece: updated_piece,
-        auto_move_scheduled: updated_auto_move_scheduled,
+        autoshift_scheduled: updated_autoshift_scheduled,
         fall_or_lock_time: updated_fall_or_lock_time,
-        lock_time_cap: updated_lock_time_cap,
+        lock_cap_time: updated_lock_cap_time,
         lowest_y: updated_lowest_y,
     }
 }
@@ -913,9 +971,9 @@ fn do_fall(
     config: &Configuration,
     state: &mut State,
     previous_piece: Piece,
-    previous_auto_move_scheduled: Option<InGameTime>,
+    previous_autoshift_scheduled: Option<InGameTime>,
     fall_time: InGameTime,
-    previous_lock_time_cap: InGameTime,
+    previous_lock_cap_time: InGameTime,
     previous_lowest_y: isize,
 ) -> Phase {
     /*
@@ -964,7 +1022,7 @@ fn do_fall(
         previous_piece
     };
 
-    let (updated_lowest_y, updated_lock_time_cap) = if updated_piece.position.1 < previous_lowest_y
+    let (updated_lowest_y, updated_lock_cap_time) = if updated_piece.position.1 < previous_lowest_y
     {
         // Refresh position and lock_time_cap.
         (
@@ -977,7 +1035,7 @@ fn do_fall(
             ),
         )
     } else {
-        (previous_lowest_y, previous_lock_time_cap)
+        (previous_lowest_y, previous_lock_cap_time)
     };
 
     let updated_is_airborne = updated_piece.is_airborne(&state.board);
@@ -987,36 +1045,44 @@ fn do_fall(
     } else {
         // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
         fall_time
-            .max(updated_lock_time_cap)
+            .max(updated_lock_cap_time)
             .min(fall_time.saturating_add(state.lock_delay.saturating_duration()))
     };
 
-    let updated_auto_move_scheduled = 'exp: {
-        let Some((is_moving_left, _dir_active_since)) =
-            calc_is_moving_left_and_dir_active_since(&state.active_buttons)
+    let updated_autoshift_scheduled = 'exp: {
+        let Some((is_left_shift, _dir_active_since, is_teleport)) =
+            calc_isleftshift_activesince_isteleport(&state.active_buttons)
         else {
             // No sensible movement information received.
             break 'exp None;
         };
 
-        let dx = if is_moving_left { -1 } else { 1 };
+        let dx = if is_left_shift { -1 } else { 1 };
         if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
-            break 'exp Some(fall_time);
+            let autoshift_time = calc_next_autoshift_time(
+                config,
+                state,
+                fall_time,
+                _dir_active_since,
+                is_teleport,
+                updated_is_airborne,
+            );
+            break 'exp Some(autoshift_time);
         }
 
         // No changes need to be made.
-        previous_auto_move_scheduled
+        previous_autoshift_scheduled
     };
 
     // 'Update' ActionState;
     // Return it to the main state machine with the latest acquired piece data.
     Phase::PieceInPlay {
         piece: updated_piece,
-        auto_move_scheduled: updated_auto_move_scheduled,
+        autoshift_scheduled: updated_autoshift_scheduled,
         fall_or_lock_time: updated_fall_or_lock_time,
-        lock_time_cap: updated_lock_time_cap,
+        lock_cap_time: updated_lock_cap_time,
         lowest_y: updated_lowest_y,
     }
 }
@@ -1083,7 +1149,7 @@ fn do_lock(
 
     if lineclears == 0 {
         // If no lines cleared, no points bonus and combo is reset.
-        state.consecutive_line_clears = 0;
+        state.consecutive_lineclears = 0;
 
         // 'Update' ActionState;
         // No lines cleared, directly proceed to spawn.
@@ -1095,18 +1161,18 @@ fn do_lock(
     // Further calculation.
 
     // Increase combo.
-    state.consecutive_line_clears += 1;
+    state.consecutive_lineclears += 1;
 
-    let combo = state.consecutive_line_clears;
+    let combo = state.consecutive_lineclears;
 
-    let is_perfect_clear = state.board.iter().all(|line| {
+    let is_perfect = state.board.iter().all(|line| {
         line.iter().all(|tile| tile.is_none()) || line.iter().all(|tile| tile.is_some())
     });
 
     // Compute main Points Bonus.
-    let points_bonus =
-        lineclears * if is_spin { 2 } else { 1 } * if is_perfect_clear { 4 } else { 1 } * 2 - 1
-            + (combo - 1);
+    let point_bonus = lineclears * if is_spin { 2 } else { 1 } * if is_perfect { 4 } else { 1 } * 2
+        - 1
+        + (combo - 1);
 
     if config.notification_level != NotificationLevel::Silent {
         feed.push((
@@ -1119,11 +1185,11 @@ fn do_lock(
 
         feed.push((
             Notification::Accolade {
-                points_bonus,
+                point_bonus,
                 tetromino: piece.tetromino,
                 is_spin,
                 lineclears,
-                is_perfect_clear,
+                is_perfect,
                 combo,
             },
             lock_time,
@@ -1134,7 +1200,7 @@ fn do_lock(
     // Lines must be cleared, enter line clearing state.
     Phase::LinesClearing {
         clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
-        points_bonus,
+        point_bonus,
     }
 }
 
@@ -1217,36 +1283,41 @@ fn check_piece_became_movable(
 /// This function may return
 /// 1. An bool which is `true` when movement is to the left (and `false` when to the right),
 /// 2. and an optional time at which the relevant 'move' direction button had been activated.
-///    This option is `None` if the move is caused by an intent to teleport instead.
+///    This option is `None` if the move is caused by an intent to teleport instantly instead.
 ///
 /// It returns `None` when it cannot determine a direction to move to, which happens when:
 /// * Both directions were pressed at the exact same in-game time, or
 /// * No direction is pressed.
-fn calc_is_moving_left_and_dir_active_since(
+fn calc_isleftshift_activesince_isteleport(
     active_buttons: &ButtonsState,
-) -> Option<(bool, Option<InGameTime>)> {
-    match (
+) -> Option<(bool, InGameTime, bool)> {
+    let teleporting_left_and_dir_active_since = match (
         active_buttons[Button::TeleLeft],
         active_buttons[Button::TeleRight],
     ) {
         (Some(time_actvd_left), Some(time_actvd_right)) => {
             match time_actvd_left.cmp(&time_actvd_right) {
                 // 'Right' was pressed more recently, go right.
-                std::cmp::Ordering::Less => return Some((false, None)),
+                std::cmp::Ordering::Less => Some((false, time_actvd_right, true)),
                 // Both pressed at exact same time, don't move.
-                std::cmp::Ordering::Equal => {}
+                std::cmp::Ordering::Equal => None,
                 // 'Left' was pressed more recently, go left.
-                std::cmp::Ordering::Greater => return Some((true, None)),
+                std::cmp::Ordering::Greater => Some((true, time_actvd_left, true)),
             }
         }
         // Only 'left' pressed.
-        (Some(_time_prsd_left), None) => return Some((true, None)),
+        (Some(time_actvd_left), None) => Some((true, time_actvd_left, true)),
         // Only 'right' pressed.
-        (None, Some(_time_prsd_right)) => return Some((false, None)),
+        (None, Some(time_actvd_right)) => Some((false, time_actvd_right, true)),
         // None pressed. No movement.
-        (None, None) => {}
+        (None, None) => None,
+    };
+
+    if teleporting_left_and_dir_active_since.is_some() {
+        return teleporting_left_and_dir_active_since;
     }
 
+    /* FIXME: Remove unused code or reconsider: let moving_left_and_dir_active_since =*/
     match (
         active_buttons[Button::MoveLeft],
         active_buttons[Button::MoveRight],
@@ -1254,50 +1325,51 @@ fn calc_is_moving_left_and_dir_active_since(
         (Some(time_actvd_left), Some(time_actvd_right)) => {
             match time_actvd_left.cmp(&time_actvd_right) {
                 // 'Right' was pressed more recently, go right.
-                std::cmp::Ordering::Less => Some((false, Some(time_actvd_right))),
+                std::cmp::Ordering::Less => Some((false, time_actvd_right, false)),
                 // Both pressed at exact same time, don't move.
                 std::cmp::Ordering::Equal => None,
                 // 'Left' was pressed more recently, go left.
-                std::cmp::Ordering::Greater => Some((true, Some(time_actvd_left))),
+                std::cmp::Ordering::Greater => Some((true, time_actvd_left, false)),
             }
         }
         // Only 'left' pressed.
-        (Some(time_prsd_left), None) => Some((true, Some(time_prsd_left))),
+        (Some(time_actvd_left), None) => Some((true, time_actvd_left, false)),
         // Only 'right' pressed.
-        (None, Some(time_prsd_right)) => Some((false, Some(time_prsd_right))),
+        (None, Some(time_actvd_right)) => Some((false, time_actvd_right, false)),
         // None pressed. No movement.
         (None, None) => None,
     }
 }
 
-fn calc_next_auto_move_time(
+fn calc_next_autoshift_time(
     config: &Configuration,
     state: &State,
     current_time: InGameTime,
-    move_direction_active_since_and_otherwise_teleport: Option<InGameTime>,
-    is_grounded: bool,
+    dir_active_since: InGameTime,
+    is_teleport: bool,
+    is_airborne: bool,
 ) -> InGameTime {
-    let Some(dir_active_since) = move_direction_active_since_and_otherwise_teleport else {
-        return current_time;
-    };
-
-    let mut move_delay =
+    let mut delayed_shift =
         if current_time.saturating_sub(dir_active_since) >= config.delayed_auto_shift {
-            config.auto_repeat_rate
+            if is_teleport {
+                Duration::ZERO
+            } else {
+                config.auto_repeat_rate
+            }
         } else {
             config.delayed_auto_shift
         };
 
     let ensure_lt_lock_delay =
-        (config.ensure_move_delay_lt_lock_delay && is_grounded).then_some(state.lock_delay);
+        (config.ensure_shift_delay_lt_lock_delay && !is_airborne).then_some(state.lock_delay);
 
     if let Some(ExtDuration::Finite(lock_delay)) = ensure_lt_lock_delay {
         // Ensure moves occur faster than locks.
         // FIXME: Is there a more elegant approach than trying to subtract the smallest possible nonzero `Duration`?
-        move_delay = move_delay.min(lock_delay.saturating_sub(Duration::from_nanos(1)));
+        delayed_shift = delayed_shift.min(lock_delay.saturating_sub(Duration::from_nanos(1)));
     }
 
-    current_time.saturating_add(move_delay)
+    current_time.saturating_add(delayed_shift)
 }
 
 fn calc_next_fall_time(

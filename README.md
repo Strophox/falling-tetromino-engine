@@ -78,7 +78,7 @@ It should already incorporate many features desired by familiar/experienced play
 - **Tetromino randomizers**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balance-out',
 - **Piece preview** (arbitrary size),
 - **Spawn delay** (ARE),
-- **Initial actions** on-piece-spawn toggle ('Initial Hold/Rotation System'),
+- **Spawn actions** (IRS/IHS; by keeping rotate/hold pressed during spawn),
 - **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
 - **Delayed auto-move** (DAS),
 - **Auto-move rate** (ARR),
@@ -157,8 +157,8 @@ impl Game {
 
 ```rust
 struct Configuration {
-    piece_preview_count: usize,
-    allow_initial_actions: bool,
+    generate_piece_preview: usize,
+    allow_spawn_actions: bool,
     rotation_system: RotationSystem,
     spawn_delay: Duration,
     delayed_auto_shift: Duration,
@@ -193,7 +193,7 @@ struct State {
     lock_delay: ExtDuration,
     pieces_locked: [u32; Tetromino::VARIANTS.len()],
     lineclears: u32,
-    consecutive_line_clears: u32,
+    consecutive_lineclears: u32,
     points: u32,
 }
 
@@ -201,7 +201,7 @@ enum Phase {
     Spawning { spawn_time: InGameTime },
     PieceInPlay {
         piece: Piece,
-        auto_move_scheduled: Option<InGameTime>,
+        autoshift_scheduled: Option<InGameTime>,
         fall_or_lock_time: InGameTime,
         lock_time_cap: InGameTime,
         lowest_y: isize,
@@ -301,8 +301,8 @@ trait GameModifier: std::fmt::Debug {
     fn on_spawn_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
     fn on_player_action_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, input: Input, time: &mut InGameTime) {}
     fn on_player_action_post(&mut self, game: GameAccess, feed: &mut NotificationFeed, input: Input) {}
-    fn on_auto_move_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
-    fn on_auto_move_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
+    fn on_autoshift_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
+    fn on_autoshift_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
     fn on_fall_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}
     fn on_fall_post(&mut self, game: GameAccess, feed: &mut NotificationFeed) {}
     fn on_lock_pre(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime) {}

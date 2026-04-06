@@ -65,7 +65,7 @@ impl GameBuilder {
                 lock_delay,
                 pieces_locked: [0; Tetromino::VARIANTS.len()],
                 lineclears: 0,
-                consecutive_line_clears: 0,
+                consecutive_lineclears: 0,
                 points: 0,
             },
             state_init: StateInitialization {
@@ -121,14 +121,14 @@ impl GameBuilder {
     }
 
     /// How many pieces should be pre-generated and accessible/visible in the game state.
-    pub fn piece_preview_count(&mut self, x: usize) -> &mut Self {
-        self.config.piece_preview_count = x;
+    pub fn generate_piece_preview(&mut self, x: usize) -> &mut Self {
+        self.config.generate_piece_preview = x;
         self
     }
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
-    pub fn allow_initial_actions(&mut self, x: bool) -> &mut Self {
-        self.config.allow_initial_actions = x;
+    pub fn allow_spawn_actions(&mut self, x: bool) -> &mut Self {
+        self.config.allow_spawn_actions = x;
         self
     }
     /// The method of tetromino rotation used.
@@ -170,8 +170,8 @@ impl GameBuilder {
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
     /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
     /// This allows DAS and ARR to function at extreme game speeds.
-    pub fn ensure_move_delay_lt_lock_delay(&mut self, x: bool) -> &mut Self {
-        self.config.ensure_move_delay_lt_lock_delay = x;
+    pub fn ensure_shift_delay_lt_lock_delay(&mut self, x: bool) -> &mut Self {
+        self.config.ensure_shift_delay_lt_lock_delay = x;
         self
     }
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.

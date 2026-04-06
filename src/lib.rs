@@ -63,9 +63,9 @@ pub type Line = [Option<TileID>; Game::WIDTH];
 /// The type of the entire two-dimensional playing grid.
 pub type Board = [Line; Game::HEIGHT];
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
-pub type Coord = (isize, isize);
-/// Coordinates offsets that can be [`add`]ed to [`Coord`]inates.
-pub type CoordOffset = (isize, isize);
+pub type Coordinate = (isize, isize);
+/// Coordinates offsets that can be [`add`]ed to [`Coordinate`]inates.
+pub type Offset = (isize, isize);
 /// Type describing the state that is stored about buttons.
 ///
 /// Specifically, it stores which buttons are considered active, and if yes, since when.
@@ -140,11 +140,14 @@ pub enum Orientation {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Piece {
     /// Type of tetromino the active piece is.
+    #[cfg_attr(feature = "serde", serde(rename = "tet"))]
     pub tetromino: Tetromino,
     /// In which way the tetromino is re-oriented.
+    #[cfg_attr(feature = "serde", serde(rename = "orn"))]
     pub orientation: Orientation,
     /// The position of the active piece on a playing grid.
-    pub position: Coord,
+    #[cfg_attr(feature = "serde", serde(rename = "pos"))]
+    pub position: Coordinate,
 }
 
 /// A struct holding information on how certain time 'delay' values progress during a game's lifetime.
@@ -162,7 +165,9 @@ pub struct Piece {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DelayParameters {
     /// The duration at which the delay starts.
+    #[cfg_attr(feature = "serde", serde(rename = "base"))]
     base_delay: ExtDuration,
+
     /// The base factor that gets exponentiated by number of line clears;
     /// `factor ^ lineclears ...`.
     ///
@@ -170,7 +175,9 @@ pub struct DelayParameters {
     /// - `0.0` means 'zero-out initial delay at every line clear',
     /// - `0.5` means 'halve initial delay for every line clear',
     /// - `1.0` means 'keep initial delay at 100%'.
+    #[cfg_attr(feature = "serde", serde(rename = "mul"))]
     factor: ExtNonNegF64,
+
     /// The base subtrahend that gets multiplied by number of line clears;
     /// `... - subtrahend * lineclears`.
     ///
@@ -178,8 +185,11 @@ pub struct DelayParameters {
     /// - `0.0` means 'subtract 0% of initial delay for every line clear',
     /// - `0.5` means 'subtract 50% of initial delay for every line clear',
     /// - `1.0` means 'subtract 100% of initial delay for every line clear'.
+    #[cfg_attr(feature = "serde", serde(rename = "sub"))]
     subtrahend: ExtDuration,
+
     /// The duration below which delay cannot decrease.
+    #[cfg_attr(feature = "serde", serde(rename = "lower"))]
     lowerbound: ExtDuration,
 }
 
@@ -188,12 +198,19 @@ pub struct DelayParameters {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameLimits {
     /// A given amount of total time that can elapse in-game.
+    #[cfg_attr(feature = "serde", serde(rename = "time"))]
     pub time_elapsed: Option<(InGameTime, bool)>,
+
     /// A given number of [`Tetromino`]s that can be locked/placed on the game's [`Board`].
+    #[cfg_attr(feature = "serde", serde(rename = "pieces"))]
     pub pieces_locked: Option<(u32, bool)>,
+
     /// A given number of lines that can be cleared from the [`Board`].
+    #[cfg_attr(feature = "serde", serde(rename = "lines"))]
     pub lines_cleared: Option<(u32, bool)>,
+
     /// A given number of points that can be scored.
+    #[cfg_attr(feature = "serde", serde(rename = "points"))]
     pub points_scored: Option<(u32, bool)>,
 }
 
@@ -236,38 +253,52 @@ pub enum NotificationLevel {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Configuration {
     /// How many pieces should be pre-generated and accessible/visible in the game state.
-    pub piece_preview_count: usize,
+    #[cfg_attr(feature = "serde", serde(rename = "preview"))]
+    pub generate_piece_preview: usize,
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
-    pub allow_initial_actions: bool,
+    #[cfg_attr(feature = "serde", serde(rename = "initsys"))]
+    pub allow_spawn_actions: bool,
     /// The method of tetromino rotation used.
+    #[cfg_attr(feature = "serde", serde(rename = "rotsys"))]
     pub rotation_system: RotationSystem,
     /// How long the game should take to spawn a new piece.
+    #[cfg_attr(feature = "serde", serde(rename = "are"))]
     pub spawn_delay: Duration,
     /// How long it takes for the active piece to start automatically shifting more to the side
     /// after the initial time a 'move' button has been pressed.
+    #[cfg_attr(feature = "serde", serde(rename = "das"))]
     pub delayed_auto_shift: Duration,
     /// How long it takes for automatic side movement to repeat once it has started.
+    #[cfg_attr(feature = "serde", serde(rename = "arr"))]
     pub auto_repeat_rate: Duration,
     /// Specification of how fall delay gets calculated from the rest of the state.
+    #[cfg_attr(feature = "serde", serde(rename = "fallparams"))]
     pub fall_delay_params: DelayParameters,
     /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
+    #[cfg_attr(feature = "serde", serde(rename = "sdf"))]
     pub soft_drop_factor: ExtNonNegF64,
     /// Specification of how fall delay gets calculated from the rest of the state.
+    #[cfg_attr(feature = "serde", serde(rename = "lockparams"))]
     pub lock_delay_params: DelayParameters,
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
     /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
     /// This allows DAS and ARR to function at extreme game speeds.
-    pub ensure_move_delay_lt_lock_delay: bool,
+    #[cfg_attr(feature = "serde", serde(rename = "sltl"))]
+    pub ensure_shift_delay_lt_lock_delay: bool,
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
+    #[cfg_attr(feature = "serde", serde(rename = "llr"))]
     pub allow_lenient_lock_reset: bool,
     /// How long each spawned active piece may touch the ground in total until it should lock down
     /// immediately.
+    #[cfg_attr(feature = "serde", serde(rename = "lcf"))]
     pub lock_reset_cap_factor: ExtNonNegF64,
     /// How long the game should take to clear a line.
+    #[cfg_attr(feature = "serde", serde(rename = "lcd"))]
     pub line_clear_duration: Duration,
     /// When to update the fall and lock delays in [`State`].
+    #[cfg_attr(feature = "serde", serde(rename = "update_every"))]
     pub update_delays_every_n_lineclears: u32,
     /// Stores the ways in which a round of the game should be limited.
     ///
@@ -275,8 +306,10 @@ pub struct Configuration {
     /// designated by the `bool` stored with it.
     ///
     /// No limitations may allow for endless games.
+    #[cfg_attr(feature = "serde", serde(rename = "limits"))]
     pub game_limits: GameLimits,
     /// The amount of feedback information that is to be generated.
+    #[cfg_attr(feature = "serde", serde(rename = "notifs"))]
     pub notification_level: NotificationLevel,
 }
 
@@ -287,8 +320,10 @@ pub struct Configuration {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StateInitialization {
     /// The value to seed the game's PRNG with.
+    #[cfg_attr(feature = "serde", serde(rename = "seed"))]
     pub seed: u64,
     /// The method (and internal state) of tetromino generation used.
+    #[cfg_attr(feature = "serde", serde(rename = "tetgen"))]
     pub tetromino_generator: TetrominoGenerator,
 }
 
@@ -369,8 +404,8 @@ pub struct State {
     pub pieces_locked: [u32; Tetromino::VARIANTS.len()],
     /// The total number of lines that have been cleared.
     pub lineclears: u32,
-    /// The number of consecutive pieces that have been played and caused a line clear.
-    pub consecutive_line_clears: u32,
+    /// The number of consecutive pieces that have been locked and caused a line clear.
+    pub consecutive_lineclears: u32,
     /// The current total points the player has scored in this game.
     pub points: u32,
 }
@@ -424,11 +459,11 @@ pub enum Phase {
         /// The tetromino game piece itself.
         piece: Piece,
         /// Optional time of the next move event.
-        auto_move_scheduled: Option<InGameTime>,
+        autoshift_scheduled: Option<InGameTime>,
         /// The time of the next fall or lock event.
         fall_or_lock_time: InGameTime,
         /// The time after which the active piece will immediately lock upon touching ground.
-        lock_time_cap: InGameTime,
+        lock_cap_time: InGameTime,
         /// The lowest recorded vertical position of the main piece.
         lowest_y: isize,
     },
@@ -440,7 +475,7 @@ pub enum Phase {
         /// The in-game time at which the game moves on to the next `Phase.`
         clear_finish_time: InGameTime,
         /// The score bonus that will be earned once the lines are cleared out.
-        points_bonus: u32,
+        point_bonus: u32,
     },
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
@@ -508,7 +543,7 @@ pub enum Notification {
     /// points bonus.
     Accolade {
         /// The final computed score bonus caused by the action.
-        points_bonus: u32,
+        point_bonus: u32,
         /// How many lines were cleared by the piece simultaneously
         lineclears: u32,
         /// The number of consecutive pieces played that caused a lineclear.
@@ -516,7 +551,7 @@ pub enum Notification {
         /// Whether the piece was spun into place.
         is_spin: bool,
         /// Whether the entire board was cleared empty by this action.
-        is_perfect_clear: bool,
+        is_perfect: bool,
         /// The tetromino type that was locked.
         tetromino: Tetromino,
     },
@@ -555,7 +590,7 @@ impl Tetromino {
     };
 
     /// Returns the mino offsets of a tetromino shape, given an orientation.
-    pub const fn minos(self, oriented: Orientation) -> [Coord; 4] {
+    pub const fn minos(self, oriented: Orientation) -> [Coordinate; 4] {
         use Orientation::*;
         match self {
             Tetromino::O => [(0, 0), (1, 0), (0, 1), (1, 1)], // ⠶
@@ -593,7 +628,7 @@ impl Tetromino {
     }
 
     /// Calculate the piece data that would result from spawning this tetromino as a piece in-play.
-    pub const fn piece_spawn_state(self) -> Piece {
+    pub const fn spawn_piece(self) -> Piece {
         let tet_width = match self {
             Tetromino::O => 2,
             Tetromino::I => 4,
@@ -646,7 +681,7 @@ impl Orientation {
 
 impl Piece {
     /// Returns the coordinates and tile types for he piece on the board.
-    pub fn tiles(&self) -> [(Coord, TileID); 4] {
+    pub fn tiles(&self) -> [(Coordinate, TileID); 4] {
         let Self {
             tetromino,
             orientation,
@@ -670,7 +705,7 @@ impl Piece {
     }
 
     /// Checks whether the piece fits a given offset from its current location onto the board.
-    pub fn offset_on(&self, board: &Board, offset: CoordOffset) -> Result<Piece, Piece> {
+    pub fn offset_on(&self, board: &Board, offset: Offset) -> Result<Piece, Piece> {
         let offset_piece = Piece {
             tetromino: self.tetromino,
             orientation: self.orientation,
@@ -690,7 +725,7 @@ impl Piece {
         &self,
         board: &Board,
         right_turns: i8,
-        offset: CoordOffset,
+        offset: Offset,
     ) -> Result<Piece, Piece> {
         let reoriented_offset_piece = Piece {
             tetromino: self.tetromino,
@@ -716,7 +751,7 @@ impl Piece {
         &self,
         board: &Board,
         right_turns: i8,
-        offsets: impl IntoIterator<Item = CoordOffset>,
+        offsets: impl IntoIterator<Item = Offset>,
     ) -> Option<Piece> {
         let original_pos = self.position;
 
@@ -734,7 +769,7 @@ impl Piece {
 
     /// Returns the position the piece would hit if it kept moving at `offset` steps.
     /// For offset `(0,0)` this function return immediately.
-    pub fn teleported(&self, board: &Board, offset: CoordOffset) -> Piece {
+    pub fn teleported(&self, board: &Board, offset: Offset) -> Piece {
         let mut updated_piece = *self;
 
         if offset != (0, 0) {
@@ -764,7 +799,7 @@ impl std::fmt::Display for GameEndCause {
                 Stat::PointsScored(_) => "Score limit reached",
             },
             GameEndCause::Forfeit { .. } => "Forfeited",
-            GameEndCause::Custom(text) => text,
+            GameEndCause::Custom(string) => string,
         };
         write!(f, "{s}")
     }
@@ -974,8 +1009,8 @@ impl<T> ops::IndexMut<Button> for [T; Button::VARIANTS.len()] {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            piece_preview_count: 3,
-            allow_initial_actions: true,
+            generate_piece_preview: 3,
+            allow_spawn_actions: true,
             rotation_system: RotationSystem::default(),
             spawn_delay: Duration::from_millis(50),
             delayed_auto_shift: Duration::from_millis(167),
@@ -984,7 +1019,7 @@ impl Default for Configuration {
             soft_drop_factor: ExtNonNegF64::new(15.0).unwrap(),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
             allow_lenient_lock_reset: false,
-            ensure_move_delay_lt_lock_delay: false,
+            ensure_shift_delay_lt_lock_delay: false,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,
@@ -1048,46 +1083,6 @@ impl Game {
         matches!(self.phase, Phase::GameEnd { .. })
     }
 
-    /// Retrieve the when the next *autonomous* in-game update is scheduled.
-    /// I.e., compute the next time the game would change state assuming no button updates
-    ///
-    /// Returns `None` when game ended.
-    ///
-    /// # Modifiers
-    /// Note that this only predicts what an unmodded game would do;
-    /// [`Modifier`]s may arbitrarily change game state and change or prevent precise update predictions.
-    pub fn peek_next_update_time(&self) -> Option<InGameTime> {
-        // Find the next autonomous game update.
-        let mut update_time = match self.phase {
-            Phase::GameEnd { .. } => return None,
-            Phase::LinesClearing {
-                clear_finish_time, ..
-            } => clear_finish_time,
-            Phase::Spawning { spawn_time } => spawn_time,
-            Phase::PieceInPlay {
-                auto_move_scheduled,
-                fall_or_lock_time,
-                ..
-            } => 'exp: {
-                if let Some(move_time) = auto_move_scheduled {
-                    if move_time < fall_or_lock_time {
-                        break 'exp move_time;
-                    }
-                }
-                fall_or_lock_time
-            }
-        };
-
-        // Check against time-related end conditions.
-        if let Some((time_limit, _)) = self.config.game_limits.time_elapsed {
-            if time_limit < update_time {
-                update_time = time_limit;
-            }
-        }
-
-        Some(update_time)
-    }
-
     /// Check whether a certain stat value has been met or exceeded.
     pub fn check_stat_met(&self, stat: Stat) -> bool {
         match stat {
@@ -1130,7 +1125,7 @@ impl std::fmt::Display for UpdateGameError {
 impl std::error::Error for UpdateGameError {}
 
 /// Adds an offset to a coordinate, wrapping on overflow.
-pub fn add((x, y): Coord, (dx, dy): CoordOffset) -> Coord {
+pub fn add((x, y): Coordinate, (dx, dy): Offset) -> Coordinate {
     (x.wrapping_add(dx), y.wrapping_add(dy))
 }
 

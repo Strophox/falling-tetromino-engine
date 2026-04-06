@@ -72,8 +72,8 @@ impl Game {
                     modify.on_player_action_pre(game, feed, *input, time)
                 }
                 Hook::PlayerActionPost(input) => modify.on_player_action_post(game, feed, *input),
-                Hook::AutoMovePre(time) => modify.on_auto_move_pre(game, feed, time),
-                Hook::AutoMovePost => modify.on_auto_move_post(game, feed),
+                Hook::AutoMovePre(time) => modify.on_autoshift_pre(game, feed, time),
+                Hook::AutoMovePost => modify.on_autoshift_post(game, feed),
                 Hook::FallPre(time) => modify.on_fall_pre(game, feed, time),
                 Hook::FallPost => modify.on_fall_post(game, feed),
                 Hook::LockPre(time) => modify.on_lock_pre(game, feed, time),
@@ -198,7 +198,7 @@ pub trait GameModifier: std::fmt::Debug {
     }
 
     /// This function gets called immediately before an autonomous move of the piece in [`Phase::PieceInPlay`] is handled.
-    fn on_auto_move_pre(
+    fn on_autoshift_pre(
         &mut self,
         _game: GameAccess,
         _feed: &mut NotificationFeed,
@@ -206,7 +206,7 @@ pub trait GameModifier: std::fmt::Debug {
     ) {
     }
     /// This function gets called immediately after an autonomous move of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_auto_move_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
+    fn on_autoshift_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately before falling of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_fall_pre(

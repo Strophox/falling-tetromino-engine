@@ -27,8 +27,10 @@ pub enum TetrominoGenerator {
     /// A multiplicity of `1` and restock threshold of `0` corresponds to the common 7-Bag.
     Stock {
         /// The number of each  piece type left in the bag.
+        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
         tets_stocked: [u32; Tetromino::VARIANTS.len()],
         /// How many of each piece type to refill with.
+        #[cfg_attr(feature = "serde", serde(rename = "bagsize"))]
         restock_multiplicity: NonZeroU32,
     },
 
@@ -39,6 +41,7 @@ pub enum TetrominoGenerator {
         ///
         /// Note that this gets normalized, i.e. all entries are decremented together until
         /// one is `0` and we only get the offset between the lowest count and the others.
+        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
         tets_relative_counts: [u32; Tetromino::VARIANTS.len()],
     },
 
@@ -52,10 +55,13 @@ pub enum TetrominoGenerator {
         /// The last time a piece was seen.
         ///
         /// `0` here denotes that it was the most recent piece generated.
+        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
         tets_last_emitted: [u32; Tetromino::VARIANTS.len()],
         /// Determines how strongly it weighs pieces not generated in a while.
+        #[cfg_attr(feature = "serde", serde(rename = "factor"))]
         factor: ExtNonNegF64,
         /// Whether factor is used as base or exponent.
+        #[cfg_attr(feature = "serde", serde(rename = "is_base"))]
         is_base_not_exp: bool,
     },
 }

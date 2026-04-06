@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
 
+## [3.0.0] - 2026-04-06
+
+### Changed
+- Movement mechanics have been adapted slightly:
+    * Teleport Left/Right now uses DAS as well, which allows e.g. teleporting and right and moving one space left without being forced to release teleport before the move.
+    * Current implementation only allows manual moves within the Tele DAS timeframe.
+- The following structs have had their fields annotated such that their serialzation is much shorter:
+    * `Piece`, `DelayParameters`, `GameLimits`, `Configuration`, `StateInitialization`, `TetrominoGenerator`
+- Renames:
+    * `Tetromino::piece_spawn_state` -> `Tetromino::spawn_piece`
+    * `piece_preview_count` -> `generate_piece_preview`
+    * `allow_initial_actions` -> `allow_spawn_actions`
+    * `consecutive_line_clears` -> `consecutive_lineclears`
+    * `lock_time_cap` -> `lock_cap_time`
+    * `points_bonus` -> `point_bonus`
+    * `is_perfect_clear` -> `is_perfect`
+    * `auto_move_scheduled` -> `autoshift_scheduled`
+    * `on_auto_move_pre/post` -> `on_autoshift_pre/post`
+    * `ensure_move_delay_lt_lock_delay` -> `ensure_shift_delay_lt_lock_delay`
+    * `Coord` -> `Coordinate`
+    * `CoordOffset` -> `Offset`
+
+
 ## [2.0.0] - 2026-04-02
 
 ### Added

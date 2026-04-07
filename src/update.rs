@@ -1313,11 +1313,11 @@ fn calc_isleftshift_activesince_isteleport(
         (None, None) => None,
     };
 
+    // FIXME: Currently, we only care about teleports if they are active, and so override ARR of auto-move.
     if teleporting_left_and_dir_active_since.is_some() {
         return teleporting_left_and_dir_active_since;
     }
 
-    /* FIXME: Remove unused code or reconsider: let moving_left_and_dir_active_since =*/
     match (
         active_buttons[Button::MoveLeft],
         active_buttons[Button::MoveRight],
@@ -1349,7 +1349,7 @@ fn calc_next_autoshift_time(
     is_teleport: bool,
     is_airborne: bool,
 ) -> InGameTime {
-    let mut delayed_shift =
+    let mut shift_delay =
         if current_time.saturating_sub(dir_active_since) >= config.delayed_auto_shift {
             if is_teleport {
                 Duration::ZERO
@@ -1360,16 +1360,16 @@ fn calc_next_autoshift_time(
             config.delayed_auto_shift
         };
 
-    let ensure_lt_lock_delay =
-        (config.ensure_shift_delay_lt_lock_delay && !is_airborne).then_some(state.lock_delay);
-
-    if let Some(ExtDuration::Finite(lock_delay)) = ensure_lt_lock_delay {
-        // Ensure moves occur faster than locks.
-        // FIXME: Is there a more elegant approach than trying to subtract the smallest possible nonzero `Duration`?
-        delayed_shift = delayed_shift.min(lock_delay.saturating_sub(Duration::from_nanos(1)));
+    if config.ensure_shift_delay_lt_lock_delay && !is_airborne {
+        if let ExtDuration::Finite(lock_delay) = state.lock_delay {
+            if shift_delay > lock_delay {
+                // Ensure moves occur faster than locks.
+                shift_delay = lock_delay
+            }
+        }
     }
 
-    current_time.saturating_add(delayed_shift)
+    current_time.saturating_add(shift_delay)
 }
 
 fn calc_next_fall_time(

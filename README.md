@@ -126,15 +126,15 @@ See also [full documentation](https://docs.rs/falling-tetromino-engine).
 ```rust
 // The main engine type.
 struct Game {
-    // May be modified by user, will not be modified by Game.
+    // May be mutated by user. Not mutated by Game.
     config: Configuration,
 
-    // Cannot be modified, basic data used for reproducibility.
+    // Cannot be mutated (minimal data used for reproducibility).
     state_init: StateInitialization,
 
-    // Cannot be modified by user, used by Game.
+    // Cannot be mutated by user. Mutated by Game.
     state: State,
-    // Cannot be modified by user, used by Game.
+    // Cannot be mutated by user. Mutated by Game.
     phase: Phase,
 
     // Modding.
@@ -145,7 +145,7 @@ impl Game {
   fn update(
     &mut self,
     mut target_time: InGameTime,
-    mut player_input: Option<Input>, // "With or without button changes."
+    mut player_input: Option<Input>,
   ) -> Result<NotificationFeed, UpdateGameError>;
 
   fn forfeit(&mut self) -> Result<NotificationFeed, UpdateGameError>;

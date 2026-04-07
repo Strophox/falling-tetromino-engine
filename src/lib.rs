@@ -258,7 +258,7 @@ pub struct Configuration {
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
     #[cfg_attr(feature = "serde", serde(rename = "initsys"))]
-    pub allow_spawn_actions: bool,
+    pub allow_spawn_manipulation: bool,
     /// The method of tetromino rotation used.
     #[cfg_attr(feature = "serde", serde(rename = "rotsys"))]
     pub rotation_system: RotationSystem,
@@ -694,7 +694,7 @@ impl Piece {
     }
 
     /// Checks whether the piece fits at its current location onto the board.
-    pub fn fits_onto(&self, board: &Board) -> bool {
+    pub fn fits_on(&self, board: &Board) -> bool {
         self.tiles().iter().all(|&((x, y), _)| {
             0 <= x
                 && (x as usize) < Game::WIDTH
@@ -704,39 +704,22 @@ impl Piece {
         })
     }
 
-    /// Checks whether the piece fits a given offset from its current location onto the board.
-    pub fn offset_on(&self, board: &Board, offset: Offset) -> Result<Piece, Piece> {
-        let offset_piece = Piece {
-            tetromino: self.tetromino,
-            orientation: self.orientation,
-            position: add(self.position, offset),
-        };
-
-        if offset_piece.fits_onto(board) {
-            Ok(offset_piece)
-        } else {
-            Err(offset_piece)
+    /// Produce the piece with its position offset some.
+    pub fn offset(&self, offset: Offset) -> Piece {
+        Piece {
+            position: self.position.add(offset),
+            ..*self
         }
     }
 
-    /// Checks whether the piece fits a given offset from its current location onto the board, with
-    /// its rotation changed by some number of right turns.
-    pub fn reoriented_offset_on(
-        &self,
-        board: &Board,
-        right_turns: i8,
-        offset: Offset,
-    ) -> Result<Piece, Piece> {
-        let reoriented_offset_piece = Piece {
-            tetromino: self.tetromino,
-            orientation: self.orientation.turn_right(right_turns),
-            position: add(self.position, offset),
-        };
+    /// Check whether the piece fits a given offset from its current location onto the board.
+    pub fn offset_on(&self, board: &Board, offset: Offset) -> Result<Piece, Piece> {
+        let offset_piece = self.offset(offset);
 
-        if reoriented_offset_piece.fits_onto(board) {
-            Ok(reoriented_offset_piece)
+        if offset_piece.fits_on(board) {
+            Ok(offset_piece)
         } else {
-            Err(reoriented_offset_piece)
+            Err(offset_piece)
         }
     }
 
@@ -745,7 +728,28 @@ impl Piece {
         self.offset_on(board, (0, -1)).is_ok()
     }
 
-    /// Given an iterator over some offsets, checks whether the rotated piece fits at any offset
+    /// Check whether the piece fits a given offset from its current location onto the board, with
+    /// its rotation changed by some number of right turns.
+    fn reoriented_offset_on(
+        &self,
+        board: &Board,
+        right_turns: i8,
+        offset: Offset,
+    ) -> Result<Piece, Piece> {
+        let reoriented_offset_piece = Piece {
+            tetromino: self.tetromino,
+            orientation: self.orientation.turn_right(right_turns),
+            position: self.position.add(offset),
+        };
+
+        (if reoriented_offset_piece.fits_on(board) {
+            Ok
+        } else {
+            Err
+        })(reoriented_offset_piece)
+    }
+
+    /// Given an iterator over some offsets, check whether the rotated piece fits at any offset
     /// location onto the board.
     pub fn find_reoriented_offset_on(
         &self,
@@ -758,8 +762,8 @@ impl Piece {
         let mut updated_piece = *self;
         updated_piece.orientation = updated_piece.orientation.turn_right(right_turns);
         for offset in offsets {
-            updated_piece.position = add(original_pos, offset);
-            if updated_piece.fits_onto(board) {
+            updated_piece.position = original_pos.add(offset);
+            if updated_piece.fits_on(board) {
                 return Some(updated_piece);
             }
         }
@@ -767,7 +771,7 @@ impl Piece {
         None
     }
 
-    /// Returns the position the piece would hit if it kept moving at `offset` steps.
+    /// Return the position the piece would hit if it kept moving at `offset` steps.
     /// For offset `(0,0)` this function return immediately.
     pub fn teleported(&self, board: &Board, offset: Offset) -> Piece {
         let mut updated_piece = *self;
@@ -1010,7 +1014,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Self {
             generate_piece_preview: 3,
-            allow_spawn_actions: true,
+            allow_spawn_manipulation: true,
             rotation_system: RotationSystem::default(),
             spawn_delay: Duration::from_millis(50),
             delayed_auto_shift: Duration::from_millis(167),
@@ -1114,9 +1118,9 @@ impl std::fmt::Display for UpdateGameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             UpdateGameError::TargetTimeInPast => {
-                "attempt to update game to timestamp it already passed"
+                "cannot update game to timestamp it already passed"
             }
-            UpdateGameError::AlreadyEnded => "attempt to update game after it already ended",
+            UpdateGameError::AlreadyEnded => "cannot update game after it already ended",
         };
         write!(f, "{s}")
     }
@@ -1124,9 +1128,17 @@ impl std::fmt::Display for UpdateGameError {
 
 impl std::error::Error for UpdateGameError {}
 
-/// Adds an offset to a coordinate, wrapping on overflow.
-pub fn add((x, y): Coordinate, (dx, dy): Offset) -> Coordinate {
-    (x.wrapping_add(dx), y.wrapping_add(dy))
+/// Trait to enable adding 2D coordinates together.
+pub trait CoordAdd {
+    /// Adds an offset to a coordinate, wrapping on overflow.
+    fn add(self, offset: Offset) -> Coordinate;
+}
+
+impl CoordAdd for Coordinate {
+    fn add(self, (dx, dy): Offset) -> Coordinate {
+        let (x, y) = self;
+        (x.wrapping_add(dx), y.wrapping_add(dy))
+    }
 }
 
 /*#[cfg(test)]

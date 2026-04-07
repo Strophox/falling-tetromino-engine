@@ -127,8 +127,8 @@ impl GameBuilder {
     }
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
-    pub fn allow_spawn_actions(&mut self, x: bool) -> &mut Self {
-        self.config.allow_spawn_actions = x;
+    pub fn allow_spawn_manipulation(&mut self, x: bool) -> &mut Self {
+        self.config.allow_spawn_manipulation = x;
         self
     }
     /// The method of tetromino rotation used.

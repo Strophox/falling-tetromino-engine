@@ -119,9 +119,9 @@ impl Game {
         loop {
             // Maybe move on to game over if time condition is met now.
             if let Some((time_limit, is_win)) = self.config.game_limits.time_elapsed {
-                // FIXME: We actually end the game *after* an event was processed that moved us beyond the time limit.
+                // FIXME: We actually end the game only *after* the first event which updates the game beyond the time limit.
                 // A different way would be to end the game *exactly* at the time limit and before processing such an event,
-                // but this requires more complicated logic.
+                // but that would seem to require more complicated logic.
                 if time_limit <= self.state.time {
                     self.phase = Phase::GameEnd {
                         cause: GameEndCause::Limit(Stat::TimeElapsed(time_limit)),
@@ -331,11 +331,6 @@ impl Game {
 }
 
 fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -> Phase {
-    let [active_movlf, active_movrt, active_rotlf, active_rotrt, active_rot180, _ds, _dh, _td, active_tellf, active_telrt, active_hld] =
-        state
-            .active_buttons
-            .map(|keydowntime| keydowntime.is_some());
-
     // Take a tetromino.
     let next_tetromino = state.piece_preview.pop_front().unwrap_or_else(|| {
         state
@@ -354,79 +349,98 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
         ),
     );
 
-    // "Initial Hold" system.
-    if active_hld && config.allow_spawn_actions {
-        if let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time) {
-            return next_phase;
+    // 'Raw' spawn piece, before remaining prespawn_actions are applied.
+    let mut initial_piece = next_tetromino.spawn_piece();
+
+    /* We do not currently allow 'arbitrary' initial actions, because
+    this forces us to impose an equally arbitrary ordering on this set of actions which should happen 'simultaneously'
+    in an single instant. What we have currently works like this:
+    1. Raw initial spawn: Position piece.
+    2. Initial 'Hold': Short-circuit rest of spawn phase since (no further sequencing, move on to next phase).
+    3. Initial 'Rotate': Use rotation system to rotate piece as if in free space.
+        * Note: We could also rotate on the actual board so more complex kicks get triggered.
+          But this interacts increasingly weirdly in some situations as well as the rest of the initial actions routine.
+    4. Initial 'Teleport': We try to reposition piece in leftmost/rightmost spot it can fit on the board, and otherwise leave it.
+    5. If piece ended up in a fitting position -> Spawn. Otherwise: -> Blockout!
+
+    FIXME: Other Initial systems to consider:
+    - Initial 'Move': Happens before or after Rotate? What if it fails?
+    - Initial 'Drop' (soft/hard/sonic(=teleport down)): ?...
+    */
+
+    // Optionally apply initial actions to spawn piece.
+    if config.allow_spawn_manipulation {
+        // "Initial Hold System".
+        if state.active_buttons[Button::HoldPiece].is_some() {
+            if let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time) {
+                return next_phase;
+            }
+        }
+
+        // "Initial Rotation System".
+        let mut turns = 0;
+        if state.active_buttons[Button::RotateLeft].is_some() {
+            turns -= 1;
+        }
+        if state.active_buttons[Button::Rotate180].is_some() {
+            turns += 2;
+        }
+        if state.active_buttons[Button::RotateRight].is_some() {
+            turns += 1;
+        }
+        initial_piece = config.rotation_system.free_rotate(&initial_piece, turns);
+
+        // "Initial Move System".
+        let (move_l, move_r) = (
+            state.active_buttons[Button::TeleLeft],
+            state.active_buttons[Button::TeleRight],
+        );
+        if move_l != move_r {
+            let dx = if move_l > move_r { -1 } else { 1 };
+            initial_piece = initial_piece.offset((dx, 0));
+        }
+
+        // "Initial Teleport System".
+        let (tele_l, tele_r) = (
+            state.active_buttons[Button::TeleLeft],
+            state.active_buttons[Button::TeleRight],
+        );
+        if tele_l != tele_r {
+            // FIXME: Aw hell naw 💀 do we really need to pull in all of `itertools` just for conditionally `.rev()`ersing a range https://stackoverflow.com/questions/59467882/how-do-i-make-a-range-reverse-on-condition
+            let xs: Vec<_> = if tele_l > tele_r {
+                (0..Game::WIDTH).collect()
+            } else {
+                (0..Game::WIDTH).rev().collect()
+            };
+
+            // Search for different position piece might fit.
+            for x in xs {
+                let tele_piece = Piece {
+                    position: (x as isize, initial_piece.position.1),
+                    ..initial_piece
+                };
+                if tele_piece.fits_on(&state.board) {
+                    initial_piece = tele_piece;
+                    break;
+                }
+            }
         }
     }
 
-    // 'Raw' spawn piece, before remaining prespawn_actions are applied.
-    let piece_v1_raw = next_tetromino.spawn_piece();
-
-    // "Initial Rotation" system.
-
-    let mut turns = 0;
-
-    if active_rotrt {
-        turns += 1;
-    }
-    if active_rot180 {
-        turns += 2;
-    }
-    if active_rotlf {
-        turns -= 1;
-    }
-
-    /* NOTE (FIXME?): We do not currently allow other initial actions, because
-    This forces us to impose an ordering on a set of actions which happen 'simultaneously'
-    at game instant but require sequencing nevertheless. Currently it works like this:
-    1. Raw initial spawn: Position piece.
-    2. Initial 'Hold': Short-circuit rest of spawn sequence (no further sequencing).
-    3. Initial 'Rotate': Use rotation system to change piece if possible.
-        * Note: We use proper rotation. We could also simply hardcode a unique Initial 'Orientation'.
-          But this is more flexible.
-
-    Initial systems considered:
-    * Initial 'Move': Happens before or after Rotate? Maybe depending on whether only one sequencing fails (->complexity)?
-    * Initial 'Teleport' (L/R/down): Same thing.
-    * Initial 'Drop' (soft/hard): Same thing.
-    */
-
-    // Optionally apply rotation to spawn piece.
-    let piece_v2_rot = if config.allow_spawn_actions {
-        config
-            .rotation_system
-            .rotate(&piece_v1_raw, &state.board, turns)
-    } else {
-        piece_v1_raw.fits_onto(&state.board).then_some(piece_v1_raw)
-    };
-
-    let Some(piece_v3_ready) = piece_v2_rot else {
-        // Otherwise BlockOut
-        let blocked_piece = if config.allow_spawn_actions {
-            match config
-                .rotation_system
-                .rotate(&piece_v1_raw, &Board::default(), turns)
-            {
-                Some(rotated_piece) => rotated_piece,
-                // This odd case happens when the rotation system does not even do rotation on an empty board.
-                None => piece_v1_raw,
-            }
-        } else {
-            piece_v1_raw
-        };
-
+    // Detect BlockOut.
+    if !initial_piece.fits_on(&state.board) {
         return Phase::GameEnd {
-            cause: GameEndCause::BlockOut { blocked_piece },
+            cause: GameEndCause::BlockOut {
+                blocked_piece: initial_piece,
+            },
             is_win: false,
         };
-    };
+    }
 
     // We're falling if piece could move down.
-    let is_airborne = piece_v3_ready.is_airborne(&state.board);
+    let is_airborne = initial_piece.is_airborne(&state.board);
 
-    let fall_or_lock_time = spawn_time.saturating_add(if is_airborne {
+    let initial_fall_or_lock_time = spawn_time.saturating_add(if is_airborne {
         // Fall immediately.
         Duration::ZERO
     } else {
@@ -434,30 +448,38 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     });
 
     // Piece just spawned, lowest y = initial y.
-    let lowest_y = piece_v3_ready.position.1;
+    let initial_lowest_y = initial_piece.position.1;
 
     // Piece just spawned, standard full lock time max.
-    let lock_cap_time = spawn_time.saturating_add(
+    let initial_lock_cap_time = spawn_time.saturating_add(
         state
             .lock_delay
             .mul_ennf64(config.lock_reset_cap_factor)
             .saturating_duration(),
     );
 
-    // Schedule immediate move after spawning, if any move button held.
-    // NOTE: We have no Initial Move System for (mechanics, code) simplicity reasons.
-    let autoshift_scheduled = if active_movlf || active_movrt || active_tellf || active_telrt {
-        Some(spawn_time)
+    // Properly schedule move after spawning, depending on how long move button has been active.
+    let initial_autoshift_scheduled = if let Some((_, dir_active_since, is_teleport)) =
+        calc_isleftshift_activesince_isteleport(&state.active_buttons)
+    {
+        Some(calc_next_autoshift_time(
+            config,
+            state,
+            spawn_time,
+            dir_active_since,
+            is_teleport,
+            is_airborne,
+        ))
     } else {
         None
     };
 
     Phase::PieceInPlay {
-        piece: piece_v3_ready,
-        autoshift_scheduled,
-        fall_or_lock_time,
-        lock_cap_time,
-        lowest_y,
+        piece: initial_piece,
+        autoshift_scheduled: initial_autoshift_scheduled,
+        fall_or_lock_time: initial_fall_or_lock_time,
+        lock_cap_time: initial_lock_cap_time,
+        lowest_y: initial_lowest_y,
     }
 }
 

@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
 
+## [4.0.0] - 2026-04-07
+
+### Added
+- Initial Move and Initial Teleport Systems added.
+- `RotationSystem::free_rotate`
+- `trait CoordAdd { fn add... }`
+- `Piece::offset`
+
+### Changed
+- Initial systems (see `allow_spawn_manipulation`) remade from scratch.
+- Renames:
+    * `allow_spawn_actions` -> `allow_spawn_manipulation`
+    * `fits_onto` -> `fits_on`
+    * `RotationSystem::Raw` -> `::Debug`
+
+### Fixed
+- `ensure_shift_delay_lt_lock_delay` no longer tries/needs to make shift_delay 1 ns shorter for no reason.
+
+### Removed
+- `Piece::reoriented_offset_on`
+
+
 ## [3.0.0] - 2026-04-06
 
 ### Changed

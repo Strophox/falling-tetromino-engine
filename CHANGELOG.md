@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
+## [4.1.0] - 2026-04-13
+
+### Added
+- `impl TryFromf64> for ExtNonNegF64`
+- `impl From<ExtNonNegF64> for f64`
+
 
 ## [4.0.0] - 2026-04-07
 

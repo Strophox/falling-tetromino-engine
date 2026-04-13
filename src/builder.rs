@@ -1,5 +1,5 @@
 /*!
-This module handles creation / initialization / building of [`Game`]s.
+Customizing, templating and constructing [`Game`]s.
  */
 
 use rand::Rng;

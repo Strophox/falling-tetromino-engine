@@ -1,12 +1,9 @@
 /*!
 # Falling Tetromino Engine
 
-`falling_tetromino_engine` is an implementation of a tetromino game engine, able to handle numerous modern
-mechanics.
+A tetromino stacker engine in Rust, with the goals of being featureful, efficient and elegant.
 
-# Example
-
-```
+```rust
 use falling_tetromino_engine::*;
 
 // Initialize a game. In-game time starts at 0s.
@@ -26,8 +23,85 @@ game.update(InGameTime::from_secs_f64(6.79), None);
 let State { board, .. } = game.state();
 ```
 
-[[FIXME: Current documentation is lacking and sometimes slightly outdated. *All* features should be commented in detail (including IRS, etc., cargo feature `serde` etc.)]]
+
+## Features Overview
+
+Fundamental points to note:
+- The engine implements the pure game logic/backend, i.e. it accurately and only simulates a virtual board with tetromino pieces spawning/moving/locking, lines clearing etc.
+- The engine is frontend-agnostic and by itself does not prescribe how to interact with the real world player (it does not know about the keyboard, refresh-/framerate etc.)
+
+Internally, the game processes a pure timeline like so:
+```txt
+Piece spawns              e.g. Game state viewed here
+|        Piece falls                  |
+|        |       Piece falls          |
+v        v       v                    v
+|--------¦--|----¦-------¦-------¦----+--¦------->
+            ^
+            |
+            "RotateLeft" player input:
+             Piece rotates
+```
+I.e. running a game at 60 Hz just means that `Game::update` is called 60 times in one second to determine the state in the timeline and show it.
+(The precision used internally is currently based on [`std::time::Duration`](<https://doc.rust-lang.org/std/time/struct.Duration.html>) which goes down to nanoseconds.)
+
+Depending on configuration, calls to `Game::update` and `Game::forfeit` can return additional information (`Notification`) which can facilitate frontend implementation (e.g. hard drop, piece lock, line clears and other visual feedback).
+
+The engine provides possibilities for compile-time modding.
+Mods may arbitrarily access and modify game state when called on given engine hooks.
+
+In terms of advanced game mechanics the engine aims to compare with other modern tetromino stackers.
+It should already incorporate many features desired by familiar/experienced players, such as:
+- Available player actions:
+    - **Move** left/right,
+    - **Rotate** left/right/180°
+    - **Drop** soft/hard
+    - **Teleport** down(='Sonic drop') and left/right
+    - **Hold** piece,
+- **Tetromino randomizers**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balance-out',
+- **Piece preview** (arbitrary size),
+- **Spawn delay** (ARE),
+- **Spawn actions** (IRS/IHS; by keeping rotate/hold pressed during spawn),
+- **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
+- **Delayed auto-move** (DAS),
+- **Auto-move rate** (ARR),
+- **Soft drop factor** (SDF),
+- **Customizable gravity/fall and lock delay curves** (exponential and/or linear; also, '20G' (fall rate of ≥1200 Hz) just becomes ≤00083s fall delay),
+- **Ensure move delay less than lock delay** toggle (i.e. DAS/ARR are automatically shortened when lock delay is very low),
+- **Allow lenient lock-reset** toggle (i.e. reset lock delay even if rotate/move fails),
+- **Lock-reset cap factor** (i.e. maximum time before lock delay cannot be reset),
+- **Line clear duration** (LCD),
+- **Customizable win/loss conditions** based on the time, pieces, lines, points,
+- Score more **points** for larger lineclears, spins ('allspin'), perfect clear, combo,
+- Game **reproducibility** (PRNG/determinism).
+
+The basics seem to have been figured out through many iterative improvements.
+Ongoing areas of investigation (to improve generalization) are:
+- Choice of `Notification`s provided to frontend clients;
+- Choice of update `Hook`s for modding clients;
+- Choice of `Stat`s to query game with or make game automatically halt;
+- Various engine generalizations for engine clients that want to plug custom behavior for currently-hardcoded structures.
+
+
+## Implementation Idea
+
+The game keeps:
+- **Configuration** to read from, which determines game behavior.
+- **State values** which persist throughout the game.
+- A dedicated **'phase'**-state field:
+    - This represents the macro-scale state machine and can store values specific to separate stages during the game.
+    - E.g., 'Spawning' (no piece) vs. 'Piece-is-in-play' (with piece data to keep track of).
+
+During each update, the game looks at the (very limited) number of upcoming in-game 'events' and processes them.
+The only complicated phase is `Phase::PieceInPlay { .. }`, which encapsulates several types of upcoming events (priority in the given order):
+- **Action by player**: Player input which causes e.g. the piece to move, makes it lock immediately or cancels auto-movement.
+- **Autonomous movement**: While move buttons are active ('held down'), the piece may move autonomously.
+- **Falling *or* locking**: Whenever the piece is airborne *or* grounded, there is an upcoming fall *or* lock scheduled.
+
+## FIXME
+Current documentation is lacking and sometimes slightly outdated. *All* features should be commented in detail (including IRS, etc., cargo feature `serde` etc.)]]
 */
+
 #![doc(
     html_logo_url = "https://github.com/Strophox/falling-tetromino-engine/blob/e707bda026a3ec24a250caed96cb907e6924d7f1/logo/tetromino_logo_glow2.png?raw=true"
 )]
@@ -64,7 +138,7 @@ pub type Line = [Option<TileID>; Game::WIDTH];
 pub type Board = [Line; Game::HEIGHT];
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
 pub type Coordinate = (isize, isize);
-/// Coordinates offsets that can be [`add`]ed to [`Coordinate`]inates.
+/// Coordinate offsets that can be [`CoordAdd::add`]ed to [`Coordinate`]s.
 pub type Offset = (isize, isize);
 /// Type describing the state that is stored about buttons.
 ///
@@ -150,7 +224,7 @@ pub struct Piece {
     pub position: Coordinate,
 }
 
-/// A struct holding information on how certain time 'delay' values progress during a game's lifetime.
+/// A struct describing how certain time 'delay' values progress during a game's lifetime.
 ///
 /// # Example
 /// The formulation used for calculation of fall delay is conceptually:
@@ -244,11 +318,16 @@ pub enum NotificationLevel {
     Debug,
 }
 
-/// Configuration options of the game, which can be modified without hurting internal invariants.
+/// Configuration options of the game.
+///
+/// Note:
+/// * [`Game::config`] **may** be mutated by user.
+/// * It is not mutated by `Game` itself.
 ///
 /// # Reproducibility
-/// Modifying a [`Game`]'s configuration after it was created might not make it easily
-/// reproducible anymore.
+/// The game does not detect changes to its configuration.
+/// It is therefore the user's responsibility to either not change configuration after the game has started,
+/// or supply the information manually / externally.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Configuration {
@@ -315,7 +394,11 @@ pub struct Configuration {
 
 /// Some values that were used to help initialize the game.
 ///
-/// Used for game reproducibility.
+/// Note:
+/// * [`Game::state_init`] cannot be mutated by user.
+/// * It is not mutated by `Game` itself.
+///
+/// This struct is used for game reproducibility.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StateInitialization {
@@ -377,6 +460,10 @@ pub enum Input {
 }
 
 /// Struct storing internal game state that changes over the course of play.
+///
+/// Note:
+/// * [`Game::state`] cannot be mutated by the user.
+/// * It is mutated by the `Game` itself.
 #[derive(Eq, PartialEq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct State {
@@ -415,9 +502,9 @@ pub struct State {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GameEndCause {
     /// 'Lock out' denotes the most recent piece would be completely locked down at
-    /// or above [`Game::SKYLINE_HEIGHT`].
+    /// or above [`Game::LOCK_OUT_HEIGHT`].
     LockOut {
-        /// The offending piece that does not fit below [`Game::SKYLINE_HEIGHT`].
+        /// The offending piece that does not fit below [`Game::LOCK_OUT_HEIGHT`].
         locking_piece: Piece,
     },
     /// 'Block out' denotes a new piece being unable to spawn due to existing board tile(s)
@@ -445,6 +532,10 @@ pub enum GameEndCause {
 }
 
 /// An event that is scheduled by the game engine to execute some action.
+///
+/// Note:
+/// * [`Game::state`] cannot be mutated by user.
+/// * It is mutated by the `Game` itself.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Phase {
@@ -492,8 +583,9 @@ pub struct Game {
     /// Some internal configuration options of the `Game`.
     ///
     /// # Reproducibility
-    /// Modifying a `Game`'s configuration after it was created might not make it easily
-    /// reproducible anymore.
+    /// The game does not detect changes to its configuration.
+    /// It is therefore the user's responsibility to either not change configuration after the game has started,
+    /// or supply the information manually / externally.
     pub config: Configuration,
     state_init: StateInitialization,
     state: State,
@@ -501,8 +593,9 @@ pub struct Game {
     /// A list of special modifiers that apply to the `Game`.
     ///
     /// # Reproducibility
-    /// Modifying a `Game`'s modifiers after it was created might not make it easily
-    /// reproducible anymore.
+    /// The game does not detect changes to its modifiers.
+    /// It is therefore the user's responsibility to either not change modifiers after the game has started,
+    /// or supply the information manually / externally.
     pub modifiers: Vec<Box<dyn GameModifier>>,
 }
 

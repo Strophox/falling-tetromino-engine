@@ -1,5 +1,5 @@
 /*!
-This module handles random generation of [`Tetromino`]s.
+Random generation of [`Tetromino`]s.
 */
 
 use std::num::NonZeroU32;
@@ -92,7 +92,7 @@ impl TetrominoGenerator {
         }
     }
 
-    /// Initialize an instance of the [`TetrominoGenerator::BalanceRelative`] variant.
+    /// Initialize an instance of the [`TetrominoGenerator::BalanceOut`] variant.
     pub const fn balance_out() -> Self {
         Self::BalanceOut {
             tets_relative_counts: [0; Tetromino::VARIANTS.len()],

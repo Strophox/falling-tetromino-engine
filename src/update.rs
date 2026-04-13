@@ -14,7 +14,7 @@ impl Game {
     ///
     /// # Modifiers
     /// Note that this only predicts what an unmodded game would do;
-    /// [`Modifier`]s may arbitrarily change game state and change or prevent precise update predictions.
+    /// [`GameModifier`]s may arbitrarily change game state and change or prevent precise update predictions.
     pub fn peek_next_update_time(&self) -> Option<InGameTime> {
         // Find the next autonomous game update.
         let mut update_time = match self.phase {

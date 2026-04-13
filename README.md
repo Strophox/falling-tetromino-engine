@@ -31,10 +31,10 @@ let mut game = Game::builder()
 
 // Update the game with info that 'left' is activated at second 4.2 (i.e. piece starts moving left).
 let input = Input::Activate(Button::MoveLeft);
-game.update(InGameTime::from_secs(4.2), Some(input));
+game.update(InGameTime::from_secs_f64(4.2), Some(input));
 
 // Update the game with info that no input changes up to second 6.79 (e.g. piece falls).
-game.update(InGameTime::from_secs(6.79), None);
+game.update(InGameTime::from_secs_f64(6.79), None);
 
 // Read game state (for rendering etc.)
 let State { board, .. } = game.state();
@@ -48,7 +48,7 @@ Fundamental points to note:
 - The engine is frontend-agnostic and by itself does not prescribe how to interact with the real world player (it does not know about the keyboard, refresh-/framerate etc.)
 
 Internally, the game processes a pure timeline like so:
-```
+```txt
 Piece spawns              e.g. Game state viewed here
 |        Piece falls                  |
 |        |       Piece falls          |

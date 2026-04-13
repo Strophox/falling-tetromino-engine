@@ -1,5 +1,7 @@
 /*!
-A module that implements a minimalistic wrapper around [`Duration`], adding that it may be infinite.
+Supertype of [`Duration`] where `dur` may be [`Infinite`].
+
+[`Infinite`]: `ExtDuration::Infinite`
 */
 
 use std::{
@@ -22,40 +24,6 @@ pub enum ExtDuration {
 impl Default for ExtDuration {
     fn default() -> Self {
         Self::Finite(Duration::default())
-    }
-}
-
-impl From<Duration> for ExtDuration {
-    fn from(value: Duration) -> Self {
-        ExtDuration::Finite(value)
-    }
-}
-
-impl Add for ExtDuration {
-    type Output = ExtDuration;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        // Saturating `ExtDuration` addition.
-        // Computes `self + other`, returning `ExtDuration::Infinite` if result would overflow `ExtDuration::Finite(Duration::MAX)`.
-        match (self, rhs) {
-            // Adding two finite durations.
-            (ExtDuration::Finite(dur0), ExtDuration::Finite(dur1)) => {
-                if let Some(dur2) = dur0.checked_add(dur1) {
-                    ExtDuration::Finite(dur2)
-                } else {
-                    // They overflowed.
-                    ExtDuration::Infinite
-                }
-            }
-            // One of the durations is not finite.
-            _ => ExtDuration::Infinite,
-        }
-    }
-}
-
-impl AddAssign for ExtDuration {
-    fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
     }
 }
 
@@ -144,6 +112,40 @@ impl ExtDuration {
             // But current implementation also has `(d + d).saturating_sub(d).is_zero()`.
             (ExtDuration::Infinite, ExtDuration::Infinite) => ExtDuration::ZERO,
         }
+    }
+}
+
+impl From<Duration> for ExtDuration {
+    fn from(value: Duration) -> Self {
+        ExtDuration::Finite(value)
+    }
+}
+
+impl Add for ExtDuration {
+    type Output = ExtDuration;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        // Saturating `ExtDuration` addition.
+        // Computes `self + other`, returning `ExtDuration::Infinite` if result would overflow `ExtDuration::Finite(Duration::MAX)`.
+        match (self, rhs) {
+            // Adding two finite durations.
+            (ExtDuration::Finite(dur0), ExtDuration::Finite(dur1)) => {
+                if let Some(dur2) = dur0.checked_add(dur1) {
+                    ExtDuration::Finite(dur2)
+                } else {
+                    // They overflowed.
+                    ExtDuration::Infinite
+                }
+            }
+            // One of the durations is not finite.
+            _ => ExtDuration::Infinite,
+        }
+    }
+}
+
+impl AddAssign for ExtDuration {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
     }
 }
 

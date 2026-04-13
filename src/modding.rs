@@ -1,5 +1,5 @@
 /*!
-This module handles the modding facilities of the engine.
+Modding facilities for the engine.
 */
 
 use crate::{
@@ -88,26 +88,29 @@ impl Game {
 /// Trait that allows direct interaction with the engine at runtime, used for 'modding'.
 ///
 /// The trait's main functionalities are:
-/// * [`GameModifier::descriptor`] - Convention to identify a mod and its initial settings by name.
+/// * [`GameModifier::id`] - Convention to identify a mod by name.
+/// * [`GameModifier::args`] - Convention to identify a mod's original constructor arguments / other information.
 /// * [`GameModifier::try_clone`] - Possibility to duplicate a mod (and therefore the game) at runtime.
 /// * Many hooks such as [`GameModifier::on_spawn_pre`] - Capability to systematically hook into engine process and modify the game state.
 ///
 /// # Reproducibility
 ///
-/// Note that for gameplay to be reproducible, it has to be ensure modification of the [`Game`] at runtime must be deterministic, in particular:
-/// * One should not use `rand::random()` (thread-randomness) from the `rand` crate.
-///   Consider accessing the available [`State::rng`] (of type [`GameRng`] accessible in [`GameAccess::state`]),
-///   which is the engines internal PRNG source used for reproducibility.
-/// * Only change the modifier's relevant state in engine hook methods which will be called the same number of times
-///   whenever a game is run with the same exact player input sequence and timings.
-///   In particular, [`GameModifier::on_time_state_progression_pre`]/[`GameModifier::on_time_state_progression_post`] should not be used to keep track of the granularity of
-///   Update calls. For example:
-///   - **Ok**: Use time-related information to simulate the modifier's own events
+/// Note that for gameplay to be reproducible, it has to be ensured that that modifiers run deterministically according to how they are called.
+/// In particular:
+/// * One should **not** use `rand::random()` and similar local thread-randomness.
+///   Instead, consider using the [`State::rng`] accessible in [`GameAccess::state`],
+///   which is the engine's internal PRNG source (used for reproducibility).
+/// * Only make visible changes that do not depend on special engine hook methods which can be
+///   called a indeterminate number of times for a given game.
+///   In particular, [`GameModifier::on_time_state_progression_pre`]/[`GameModifier::on_time_state_progression_post`] should **not** be used to keep track of
+///   e.g. the number of times [`Game::update`] has been called specifically. For example:
+///   - O.k.: Use time-related information to simulate the modifier's own events
 ///     which should happen at arbitrary but deterministic points on the engine timeline.
-///     (e.g. the tetromino type is converted to `Tetromino::I` )
+///     (e.g. the tetromino type is converted to `Tetromino::I` after 1s of `Piece` spawn.)
+///   - **Not** O.k.: Keep track of the frontend's approximate framerate (by counting number of time update calls)
+///     and turn the active piece into `Tetromino::O` for certain values.
 pub trait GameModifier: std::fmt::Debug {
     /// Convention to identify a mod by name.
-    ///
     fn id(&self) -> String;
 
     /// Convention to reconstruct an identified mod's constructor arguments.
@@ -148,7 +151,7 @@ pub trait GameModifier: std::fmt::Debug {
     ) {
     }
 
-    /// This function gets called once, when the game has finished getting constructed by [`GameBuilder`].
+    /// This function gets called once, when the game has finished getting constructed by `GameBuilder`.
     fn on_game_built(&mut self, _game: GameAccess) {}
 
     /// This function gets called once, when the game has entered [`Phase::GameEnd`].

@@ -1,5 +1,5 @@
 /*!
-This module handles rotation of [`Piece`]s.
+Rotation of tetromino [`Piece`]s.
 */
 
 use crate::{Board, CoordAdd, Offset, Orientation, Piece, Tetromino};

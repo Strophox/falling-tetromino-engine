@@ -1,5 +1,5 @@
 /*!
-A module that implements a minimalistic wrapper around `f64`, asserting that it is in the range `+0.0 ≤ f ≤ +∞`.
+Subtype of [`f64`] where `+0.0 ≤ value ≤ +∞`.
 */
 
 /// An [`f64`] that is known to be non-negative or positive infinity, but not `NaN`, `+0.0 ≤ value ≤ +∞`.
@@ -28,12 +28,6 @@ impl Ord for ExtNonNegF64 {
 impl std::hash::Hash for ExtNonNegF64 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u64(self.0.to_bits());
-    }
-}
-
-impl From<u32> for ExtNonNegF64 {
-    fn from(value: u32) -> Self {
-        Self(f64::from(value))
     }
 }
 
@@ -103,6 +97,26 @@ impl std::ops::Add for ExtNonNegF64 {
 impl std::ops::AddAssign for ExtNonNegF64 {
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
+    }
+}
+
+impl From<u32> for ExtNonNegF64 {
+    fn from(value: u32) -> Self {
+        Self(f64::from(value))
+    }
+}
+
+impl TryFrom<f64> for ExtNonNegF64 {
+    type Error = f64;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        ExtNonNegF64::new(value).ok_or(value)
+    }
+}
+
+impl From<ExtNonNegF64> for f64 {
+    fn from(value: ExtNonNegF64) -> Self {
+        value.get()
     }
 }
 

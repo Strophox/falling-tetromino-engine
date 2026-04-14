@@ -684,6 +684,8 @@ pub enum Notification {
 
     /// Message that the game has ended.
     GameEnded {
+        /// Why the game ended.
+        cause: GameEndCause,
         /// Whether it was a win or a loss.
         is_win: bool,
     },

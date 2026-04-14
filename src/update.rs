@@ -67,7 +67,13 @@ impl Game {
             is_win: false,
         };
 
-        let mut feed = vec![(Notification::GameEnded { is_win: false }, self.state.time)];
+        let mut feed = vec![(
+            Notification::GameEnded {
+                cause: GameEndCause::Forfeit { piece_in_play },
+                is_win: false,
+            },
+            self.state.time,
+        )];
 
         self.run_mods(Hook::GameEnded, &mut feed);
 
@@ -134,9 +140,15 @@ impl Game {
             match self.phase {
                 // Game ended by now.
                 // Return immediately and with accumulated messages.
-                Phase::GameEnd { cause: _, is_win } => {
+                Phase::GameEnd { ref cause, is_win } => {
                     // Add message that game ended.
-                    feed.push((Notification::GameEnded { is_win }, self.state.time));
+                    feed.push((
+                        Notification::GameEnded {
+                            cause: cause.clone(),
+                            is_win,
+                        },
+                        self.state.time,
+                    ));
                     self.run_mods(Hook::GameEnded, &mut feed);
                     return Ok(feed);
                 }

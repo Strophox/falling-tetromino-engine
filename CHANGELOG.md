@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
 
+## [5.0.0] - 2026-04-14
+
+### Changed
+- `Notification::GameEnded` finally includes `cause: GameEndCause` information.
+
+
 ## [4.2.0] - 2026-04-14
 
 ### Changed

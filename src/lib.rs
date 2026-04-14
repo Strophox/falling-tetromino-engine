@@ -216,9 +216,11 @@ pub struct Piece {
     /// Type of tetromino the active piece is.
     #[cfg_attr(feature = "serde", serde(rename = "tet"))]
     pub tetromino: Tetromino,
+
     /// In which way the tetromino is re-oriented.
     #[cfg_attr(feature = "serde", serde(rename = "orn"))]
     pub orientation: Orientation,
+
     /// The position of the active piece on a playing grid.
     #[cfg_attr(feature = "serde", serde(rename = "pos"))]
     pub position: Coordinate,
@@ -334,51 +336,65 @@ pub struct Configuration {
     /// How many pieces should be pre-generated and accessible/visible in the game state.
     #[cfg_attr(feature = "serde", serde(rename = "preview"))]
     pub generate_piece_preview: usize,
+
     /// Whether holding a 'rotate' button lets a piece be smoothly spawned in a rotated state,
     /// or holding the 'hold' button lets a piece be swapped immediately before it evens spawns.
     #[cfg_attr(feature = "serde", serde(rename = "initsys"))]
     pub allow_spawn_manipulation: bool,
+
     /// The method of tetromino rotation used.
     #[cfg_attr(feature = "serde", serde(rename = "rotsys"))]
     pub rotation_system: RotationSystem,
+
     /// How long the game should take to spawn a new piece.
     #[cfg_attr(feature = "serde", serde(rename = "are"))]
     pub spawn_delay: Duration,
+
     /// How long it takes for the active piece to start automatically shifting more to the side
     /// after the initial time a 'move' button has been pressed.
     #[cfg_attr(feature = "serde", serde(rename = "das"))]
     pub delayed_auto_shift: Duration,
+
     /// How long it takes for automatic side movement to repeat once it has started.
     #[cfg_attr(feature = "serde", serde(rename = "arr"))]
     pub auto_repeat_rate: Duration,
+
     /// Specification of how fall delay gets calculated from the rest of the state.
     #[cfg_attr(feature = "serde", serde(rename = "fallparams"))]
     pub fall_delay_params: DelayParameters,
+
     /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
     #[cfg_attr(feature = "serde", serde(rename = "sdf"))]
     pub soft_drop_factor: ExtNonNegF64,
+
     /// Specification of how fall delay gets calculated from the rest of the state.
     #[cfg_attr(feature = "serde", serde(rename = "lockparams"))]
     pub lock_delay_params: DelayParameters,
+
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
     /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
     /// This allows DAS and ARR to function at extreme game speeds.
     #[cfg_attr(feature = "serde", serde(rename = "sltl"))]
     pub ensure_shift_delay_lt_lock_delay: bool,
+
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
     #[cfg_attr(feature = "serde", serde(rename = "llr"))]
     pub allow_lenient_lock_reset: bool,
+
     /// How long each spawned active piece may touch the ground in total until it should lock down
     /// immediately.
     #[cfg_attr(feature = "serde", serde(rename = "lcf"))]
     pub lock_reset_cap_factor: ExtNonNegF64,
+
     /// How long the game should take to clear a line.
     #[cfg_attr(feature = "serde", serde(rename = "lcd"))]
     pub line_clear_duration: Duration,
+
     /// When to update the fall and lock delays in [`State`].
     #[cfg_attr(feature = "serde", serde(rename = "update_every"))]
     pub update_delays_every_n_lineclears: u32,
+
     /// Stores the ways in which a round of the game should be limited.
     ///
     /// Each limitation may be either of positive ('game completed') or negative ('game over'), as
@@ -387,6 +403,7 @@ pub struct Configuration {
     /// No limitations may allow for endless games.
     #[cfg_attr(feature = "serde", serde(rename = "limits"))]
     pub game_limits: GameLimits,
+
     /// The amount of feedback information that is to be generated.
     #[cfg_attr(feature = "serde", serde(rename = "notifs"))]
     pub notification_level: NotificationLevel,
@@ -405,6 +422,7 @@ pub struct StateInitialization {
     /// The value to seed the game's PRNG with.
     #[cfg_attr(feature = "serde", serde(rename = "seed"))]
     pub seed: u64,
+
     /// The method (and internal state) of tetromino generation used.
     #[cfg_attr(feature = "serde", serde(rename = "tetgen"))]
     pub tetromino_generator: TetrominoGenerator,
@@ -507,25 +525,30 @@ pub enum GameEndCause {
         /// The offending piece that does not fit below [`Game::LOCK_OUT_HEIGHT`].
         locking_piece: Piece,
     },
+
     /// 'Block out' denotes a new piece being unable to spawn due to existing board tile(s)
     /// blocking one or several of the cells of a piece to be spawned.
     BlockOut {
         /// The offending piece that does not fit onto board.
         blocked_piece: Piece,
     },
+
     // 'Top out' denotes a number of new lines being unable to enter the existing board.
     /// This is currently unused in the base engine.
     TopOut {
         /// The lines that got pushed out and did not fit on the board anymore.
         top_lines: Vec<Line>,
     },
+
     /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
+
     /// Game ended by player forfeit.
     Forfeit {
         /// Piece that was in play at time of forfeit.
         piece_in_play: Option<Piece>,
     },
+
     /// Custom game over.
     /// This is unused in the base engine and intended for modding.
     Custom(String),
@@ -545,6 +568,7 @@ pub enum Phase {
         /// The in-game time at which the game moves on to the next `Phase.`
         spawn_time: InGameTime,
     },
+
     /// The state of the game having an active piece in-play, which can be controlled by a player.
     PieceInPlay {
         /// The tetromino game piece itself.
@@ -558,6 +582,7 @@ pub enum Phase {
         /// The lowest recorded vertical position of the main piece.
         lowest_y: isize,
     },
+
     /// The state of the game "taking its time" to clear out lines.
     /// In this state the board is as it was at the time of the piece locking down,
     /// i.e. with some horizontally completed lines.
@@ -568,6 +593,7 @@ pub enum Phase {
         /// The score bonus that will be earned once the lines are cleared out.
         point_bonus: u32,
     },
+
     /// The state of the game being irreversibly over, and not playable anymore.
     GameEnd {
         /// The cause of why the game ended.
@@ -587,9 +613,13 @@ pub struct Game {
     /// It is therefore the user's responsibility to either not change configuration after the game has started,
     /// or supply the information manually / externally.
     pub config: Configuration,
+
     state_init: StateInitialization,
+
     state: State,
+
     phase: Phase,
+
     /// A list of special modifiers that apply to the `Game`.
     ///
     /// # Reproducibility
@@ -609,11 +639,20 @@ pub struct Game {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Notification {
+    /// A piece was quickly dropped from its original position to a new one.
+    HardDrop {
+        /// Information about the old state of the hard-dropped piece.
+        height_dropped: usize,
+        /// Information about the new state of the hard-dropped piece.
+        dropped_piece: Piece,
+    },
+
     /// A piece was locked down in a certain configuration.
     PieceLocked {
         /// Information about the [`Piece`] that was locked.
         piece: Piece,
     },
+
     /// A number of lines were cleared.
     ///
     /// The duration indicates the line clear delay the game was configured with at the time.
@@ -625,13 +664,7 @@ pub enum Notification {
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].
         line_clear_duration: InGameTime,
     },
-    /// A piece was quickly dropped from its original position to a new one.
-    HardDrop {
-        /// Information about the old state of the hard-dropped piece.
-        height_dropped: usize,
-        /// Information about the new state of the hard-dropped piece.
-        dropped_piece: Piece,
-    },
+
     /// The player cleared some lines with a number of other stats that might have increased their
     /// points bonus.
     Accolade {
@@ -648,15 +681,18 @@ pub enum Notification {
         /// The tetromino type that was locked.
         tetromino: Tetromino,
     },
+
     /// Message that the game has ended.
     GameEnded {
         /// Whether it was a win or a loss.
         is_win: bool,
     },
+
     /// A message containing debug information.
     ///
     /// This feedback type is only generated on [`NotificationLevel::Debug`]
     Debug(String),
+
     /// Generic text feedback message.
     ///
     /// This is currently unused in the base engine.
@@ -669,6 +705,7 @@ pub enum UpdateGameError {
     /// Error variant caused by an attempt to update the game with a requested `update_time` that lies in
     /// the game's past (` < game.state().time`).
     TargetTimeInPast,
+
     /// Error variant caused by an attempt to update a game that has ended (`game.ended() == true`).
     AlreadyEnded,
 }

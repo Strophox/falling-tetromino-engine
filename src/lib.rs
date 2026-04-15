@@ -1149,7 +1149,7 @@ impl<T> ops::IndexMut<Button> for [T; Button::VARIANTS.len()] {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            generate_piece_preview: 3,
+            generate_piece_preview: 4,
             allow_spawn_manipulation: true,
             rotation_system: RotationSystem::default(),
             spawn_delay: Duration::from_millis(50),

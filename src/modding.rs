@@ -89,7 +89,7 @@ impl Game {
 ///
 /// The trait's main functionalities are:
 /// * [`GameModifier::id`] - Convention to identify a mod by name.
-/// * [`GameModifier::args`] - Convention to identify a mod's original constructor arguments / other information.
+/// * [`GameModifier::cfg`] - Convention to serialize a mod's configuration of some sort, in particular for reproducibility.
 /// * [`GameModifier::try_clone`] - Possibility to duplicate a mod (and therefore the game) at runtime.
 /// * Many hooks such as [`GameModifier::on_spawn_pre`] - Capability to systematically hook into engine process and modify the game state.
 ///
@@ -113,27 +113,34 @@ pub trait GameModifier: std::fmt::Debug {
     /// Convention to identify a mod by name.
     fn id(&self) -> String;
 
-    /// Convention to reconstruct an identified mod's constructor arguments.
+    /// Convention to reconstruct an identified mod's starting configuration.
     ///
     /// Given a constructor for a modifier ready to be attached to a game,
     /// ```ignore
-    /// fn modifier(arg1: T1, ..., argX: TX) -> Box<dyn GameModifier>;
+    /// fn modifier(cfg: MyModCfg) -> Box<dyn GameModifier>;
     /// ```
     /// or alternatively, a build finalizer which constructs a game,
     /// ```ignore
-    /// fn build(builder: &GameBuilder, arg1: T1, ..., argX: TX) -> Game;
+    /// fn build(builder: &GameBuilder, cfg: MyModCfg) -> Game;
     /// ```
-    /// Then, by convention, the modifier may store and produce a String
-    /// which serializes its original constructor arguments. For example,
+    /// Then, by convention, the modifier may make available a String
+    /// which serializes its configuration.
+    /// In particular, this can be used for reproducibility. For example,
     /// ```ignore
-    /// let constructor_args = (arg1, ..., argX);
-    /// let args = serde_json::to_string(&constructor_args).unwrap();
+    /// fn cfg(&self) -> String {
+    ///     let initial_config = MyModCfg { start_fooing_at: self.stored_initial_cfg.start_fooing_at };
+    ///     serde_json::to_string(&initial_config).unwrap();
+    /// }
     /// ```
     /// Such that it may be reconstructable using
     /// ```ignore
-    /// let (arg1, ..., argX) = serde_json::from_str(args);
+    /// let cfg: String = my_mod.cfg();
+    ///
+    /// /* Store cfg to file and load it again etc. */
+    ///
+    /// let initial_config = serde_json::from_str(cfg);
     /// ```
-    fn args(&self) -> String;
+    fn cfg(&self) -> String;
 
     /// Try to clone the modifier if possible.
     /// Otherwise return an error.

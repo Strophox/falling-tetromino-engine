@@ -94,9 +94,9 @@ impl Game {
             config: self.config.clone(),
         };
 
-        let mod_descriptors = self.modifiers.iter().map(|m| (m.id(), m.args())).collect();
+        let mod_ids_cfgs = self.modifiers.iter().map(|m| (m.id(), m.cfg())).collect();
 
-        (builder, mod_descriptors)
+        (builder, mod_ids_cfgs)
     }
 }
 

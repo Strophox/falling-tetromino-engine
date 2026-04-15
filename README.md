@@ -288,7 +288,7 @@ enum GameEndCause {
 ```rust
 trait GameModifier: std::fmt::Debug {
     fn id(&self) -> String;
-    fn args(&self) -> String;
+    fn cfg(&self) -> String;
     fn try_clone(&self) -> Result<Box<dyn GameModifier>, String>;
 
     fn on_player_input_received(&mut self, game: GameAccess, feed: &mut NotificationFeed, time: &mut InGameTime, player_input: &mut Option<Input>) {}

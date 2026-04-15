@@ -657,8 +657,8 @@ pub enum Notification {
     ///
     /// The duration indicates the line clear delay the game was configured with at the time.
     LinesClearing {
-        /// A list of height coordinates/indices signifying where lines where cleared.
-        y_coords: Vec<usize>,
+        /// A list of height coordinates/indices and the lines themselves that were cleared.
+        lines: Vec<(usize, [TileID; Game::WIDTH])>,
         /// Game time where lines started clearing.
         /// Starts simultaneously to when a piece was locked and successfully completed some horizontal [`Line`]s,
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].

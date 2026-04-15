@@ -1172,14 +1172,14 @@ fn do_lock(
     // Points bonus calculation.
 
     // Find lines which might get cleared by piece locking. (actual clearing done later).
-    let mut cleared_y_coords = Vec::<usize>::with_capacity(4);
+    let mut cleared_lines = Vec::new();
     for y in (0..Game::HEIGHT).rev() {
-        if state.board[y].iter().all(|mino| mino.is_some()) {
-            cleared_y_coords.push(y);
+        if !state.board[y].contains(&None) {
+            cleared_lines.push((y, state.board[y].map(Option::unwrap)));
         }
     }
 
-    let lineclears = u32::try_from(cleared_y_coords.len()).unwrap();
+    let lineclears = u32::try_from(cleared_lines.len()).unwrap();
 
     if lineclears == 0 {
         // If no lines cleared, no points bonus and combo is reset.
@@ -1211,7 +1211,7 @@ fn do_lock(
     if config.notification_level != NotificationLevel::Silent {
         feed.push((
             Notification::LinesClearing {
-                y_coords: cleared_y_coords,
+                lines: cleared_lines,
                 line_clear_duration: config.line_clear_duration,
             },
             lock_time,

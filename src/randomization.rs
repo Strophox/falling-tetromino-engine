@@ -18,8 +18,17 @@ use crate::{ExtNonNegF64, Tetromino};
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TetrominoGenerator {
-    /// Uniformly random piece generator.
-    Uniform,
+    /// Uniform random piece generator that might try to avoid repetition at least once.
+    Classic {
+        /// The tetromino that was last generated.
+        #[cfg_attr(feature = "serde", serde(rename = "lasttet"))]
+        tet_last_emitted: Option<Tetromino>,
+
+        /// How many times we may reroll to get a different piece until we give up.
+        #[cfg_attr(feature = "serde", serde(rename = "aversion"))]
+        aversion_to_last: u32,
+    },
+
     /// Standard 'bag' generator.
     ///
     /// Stock works by picking `n` copies of each [`Tetromino`] type, and then uniformly randomly
@@ -27,8 +36,9 @@ pub enum TetrominoGenerator {
     /// A multiplicity of `1` and restock threshold of `0` corresponds to the common 7-Bag.
     Stock {
         /// The number of each  piece type left in the bag.
-        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
+        #[cfg_attr(feature = "serde", serde(rename = "stocked"))]
         tets_stocked: [u32; Tetromino::VARIANTS.len()],
+
         /// How many of each piece type to refill with.
         #[cfg_attr(feature = "serde", serde(rename = "bagsize"))]
         restock_multiplicity: NonZeroU32,
@@ -41,8 +51,8 @@ pub enum TetrominoGenerator {
         ///
         /// Note that this gets normalized, i.e. all entries are decremented together until
         /// one is `0` and we only get the offset between the lowest count and the others.
-        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
-        tets_relative_counts: [u32; Tetromino::VARIANTS.len()],
+        #[cfg_attr(feature = "serde", serde(rename = "tallies"))]
+        tets_relative_tallies: [u32; Tetromino::VARIANTS.len()],
     },
 
     /// Recency/history-based piece generator.
@@ -55,11 +65,13 @@ pub enum TetrominoGenerator {
         /// The last time a piece was seen.
         ///
         /// `0` here denotes that it was the most recent piece generated.
-        #[cfg_attr(feature = "serde", serde(rename = "tets"))]
+        #[cfg_attr(feature = "serde", serde(rename = "lasttets"))]
         tets_last_emitted: [u32; Tetromino::VARIANTS.len()],
+
         /// Determines how strongly it weighs pieces not generated in a while.
         #[cfg_attr(feature = "serde", serde(rename = "factor"))]
         factor: ExtNonNegF64,
+
         /// Whether factor is used as base or exponent.
         #[cfg_attr(feature = "serde", serde(rename = "is_base"))]
         is_base_not_exp: bool,
@@ -73,6 +85,22 @@ impl Default for TetrominoGenerator {
 }
 
 impl TetrominoGenerator {
+    /// Initialize a uniformly random generator variant.
+    pub const fn uniform() -> Self {
+        Self::Classic {
+            tet_last_emitted: None,
+            aversion_to_last: 0,
+        }
+    }
+
+    /// Initialize a classic random generator that is uniformly random but retries once.
+    pub const fn classic() -> Self {
+        Self::Classic {
+            tet_last_emitted: None,
+            aversion_to_last: 1,
+        }
+    }
+
     /// Initialize a typical 7-Bag instance of the [`TetrominoGenerator::Stock`] variant.
     pub const fn bag() -> Self {
         Self::Stock {
@@ -95,7 +123,7 @@ impl TetrominoGenerator {
     /// Initialize an instance of the [`TetrominoGenerator::BalanceOut`] variant.
     pub const fn balance_out() -> Self {
         Self::BalanceOut {
-            tets_relative_counts: [0; Tetromino::VARIANTS.len()],
+            tets_relative_tallies: [0; Tetromino::VARIANTS.len()],
         }
     }
 
@@ -121,7 +149,25 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.tetromino_generator {
-            TetrominoGenerator::Uniform => Some(Tetromino::VARIANTS[self.rng.random_range(0..=6)]),
+            TetrominoGenerator::Classic {
+                tet_last_emitted,
+                aversion_to_last,
+            } => {
+                let mut new_tet = Tetromino::VARIANTS[self.rng.random_range(0..=6)];
+
+                if let Some(old_tet) = *tet_last_emitted {
+                    for _ in 0..*aversion_to_last {
+                        // New tetromino found, we're done.
+                        if new_tet != old_tet {
+                            break;
+                        }
+                        // Retry.
+                        new_tet = Tetromino::VARIANTS[self.rng.random_range(0..=6)];
+                    }
+                }
+
+                Some(new_tet)
+            }
 
             TetrominoGenerator::Stock {
                 tets_stocked,
@@ -151,19 +197,19 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
             }
 
             TetrominoGenerator::BalanceOut {
-                tets_relative_counts,
+                tets_relative_tallies,
             } => {
                 // SAFETY: `self.relative_counts` always has a minimum.
-                let min = *tets_relative_counts.iter().min().unwrap();
+                let min = *tets_relative_tallies.iter().min().unwrap();
                 if min > 0 {
-                    for x in tets_relative_counts.iter_mut() {
+                    for x in tets_relative_tallies.iter_mut() {
                         *x -= min;
                     }
                 }
 
                 // Alternative get_weight's: 2.0f64.powf(f64::from(n)).recip() ; f64::from(1 + n).recip()
                 let get_weight = |&n| f64::from(n).exp().recip().max(f64::MIN);
-                let weights = tets_relative_counts.iter().map(get_weight);
+                let weights = tets_relative_tallies.iter().map(get_weight);
 
                 // SAFETY:
                 // * `InvalidInput`: Iterator `weights` is nonempty (7).
@@ -173,7 +219,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 let idx = WeightedIndex::new(weights).unwrap().sample(&mut self.rng);
 
                 // Update individual tetromino counter.
-                tets_relative_counts[idx] = tets_relative_counts[idx].saturating_add(1);
+                tets_relative_tallies[idx] = tets_relative_tallies[idx].saturating_add(1);
 
                 Some(Tetromino::VARIANTS[idx])
             }

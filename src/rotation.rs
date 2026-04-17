@@ -131,8 +131,8 @@ fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option
         0 => &[(0, 0)],
         // Some basic 180 rotation I came up with.
         2 => match piece.tetromino {
-            Tetromino::O | Tetromino::I | Tetromino::S | Tetromino::Z => &[(0, 0)][..],
-            Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
+            Tetromino::O => &[(0, 0)][..],
+            Tetromino::I | Tetromino::S | Tetromino::Z | Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
                 N => &[( 0,-1), ( 0, 0)],
                 E => &[(-1, 0), ( 0, 0)],
                 S => &[( 0, 1), ( 0, 0)],

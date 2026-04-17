@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(Unreleased changes not logged at this time, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
 
 
+## [8.1.0] - 2026-04-17
+
+### Changed
+- 180° rotation for SRS is not visual anymore (i.e. no visual change for 180°-symmetric pieces), but actually acts like two left- or right rotations (visual wobble).
+
+
 ## [8.0.0] - 2026-04-17
 
 ### Changed

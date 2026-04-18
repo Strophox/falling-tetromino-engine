@@ -984,10 +984,17 @@ fn do_autonomous_shift(
             previous_fall_or_lock_time
         }
     } else {
-        // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
-        autoshift_time
-            .max(updated_lock_cap_time)
-            .min(autoshift_time.saturating_add(state.lock_delay.saturating_duration()))
+        // Calculate schedule lock time.
+        // Only update lock time if piece changed.
+        let lock_reset_piecechange = updated_piece != previous_piece;
+        if lock_reset_piecechange {
+            // NOTE: updated_lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
+            autoshift_time
+                .max(updated_lock_cap_time)
+                .min(autoshift_time.saturating_add(state.lock_delay.saturating_duration()))
+        } else {
+            previous_fall_or_lock_time
+        }
     };
 
     // Update 'ActionState';

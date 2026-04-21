@@ -110,24 +110,22 @@ Current documentation is lacking and sometimes slightly outdated. *All* features
 )]
 #![warn(missing_docs)]
 
-mod builder;
-pub mod extduration;
-pub mod extnonnegf64;
-pub mod modding;
-pub mod randomization;
-pub mod rotation;
-mod update;
+pub mod game_building;
+pub mod game_modding;
+pub mod game_update;
+pub mod helper_types;
+pub mod piece_rotation;
+pub mod tetromino_generation;
 
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
 
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
 
-pub use builder::GameBuilder;
-pub use extduration::ExtDuration;
-pub use extnonnegf64::ExtNonNegF64;
-pub use modding::{GameAccess, GameModifier};
-pub use randomization::TetrominoGenerator;
-pub use rotation::RotationSystem;
+pub use game_building::GameBuilder;
+pub use game_modding::{GameAccess, GameModifier};
+pub use helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
+pub use piece_rotation::RotationSystem;
+pub use tetromino_generation::TetrominoGenerator;
 
 /// Abstract identifier for which type of tile occupies a cell in the grid.
 pub type TileID = NonZeroU8;

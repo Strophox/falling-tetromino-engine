@@ -2,7 +2,7 @@
 This module handles what happens when [`Game::update`] is called.
 */
 
-use crate::modding::Hook;
+use crate::game_modding::Hook;
 
 use super::*;
 

@@ -4,7 +4,7 @@ Customizing, templating and constructing [`Game`]s.
 
 use rand::Rng;
 
-use crate::modding::Hook;
+use crate::game_modding::Hook;
 
 use super::*;
 

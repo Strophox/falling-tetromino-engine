@@ -5,9 +5,8 @@ Random generation of [`Tetromino`]s.
 use std::num::NonZeroU32;
 
 use rand::{
-    self,
-    distr::{weighted::WeightedIndex, Distribution},
-    Rng, RngExt,
+    self, Rng, RngExt,
+    distr::{Distribution, weighted::WeightedIndex},
 };
 
 use crate::{ExtNonNegF64, Tetromino};

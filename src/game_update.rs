@@ -116,25 +116,54 @@ impl Game {
 
         if player_input.is_some() {
             self.run_mods(
-                Hook::PlayerInputReceived(&mut target_time, &mut player_input),
+                Hook::ReceivePlayerInput(&mut target_time, &mut player_input),
                 &mut feed,
             );
         }
 
         // We linearly process all events until we reach the targeted update time.
         loop {
-            // Maybe move on to game over if time condition is met now.
-            if let Some((time_limit, is_win)) = self.config.game_limits.time_elapsed {
-                // FIXME: We actually end the game only *after* the first event which updates the game beyond the time limit.
-                // A different way would be to end the game *exactly* at the time limit and before processing such an event,
-                // but that would seem to require more complicated logic.
-                if time_limit <= self.state.time {
+            // Check if game should end.
+            if !self.has_ended() {
+                self.run_mods(Hook::CheckGameLimitsPre, &mut feed);
+                'check_game_limits: {
+                    let (stat, is_win) = if let Some((line_limit, is_win)) =
+                        self.config.game_limits.lines_cleared
+                        && line_limit <= self.state.lineclears
+                    {
+                        (Stat::LinesCleared(line_limit), is_win)
+                    } else if let Some((points_limit, is_win)) =
+                        self.config.game_limits.points_scored
+                        && points_limit <= self.state.points
+                    {
+                        (Stat::PointsScored(points_limit), is_win)
+                    } else if let Some((pieces_limit, is_win)) =
+                        self.config.game_limits.pieces_locked
+                        && pieces_limit <= self.state.pieces_locked.iter().sum()
+                    {
+                        (Stat::PiecesLocked(pieces_limit), is_win)
+                    } else if let Some((time_limit, is_win)) = self.config.game_limits.time_elapsed
+                        && time_limit <= self.state.time
+                    {
+                        // FIXME: We actually end the game only *after* the first event which updates the game beyond the time limit.
+                        // A different way would be to end the game *exactly* at the time limit and before processing such an event,
+                        // but that would seem to require more complicated logic.
+                        (Stat::TimeElapsed(time_limit), is_win)
+                    } else {
+                        break 'check_game_limits;
+                    };
+
                     self.phase = Phase::GameEnd {
-                        cause: GameEndCause::Limit(Stat::TimeElapsed(time_limit)),
+                        cause: GameEndCause::Limit(stat),
                         is_win,
                     };
                 }
                 self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
+            }
+
+            // Except for the case where game phase has updated to have Ended, the upcoming match branches will all progress state and time.
+            if !self.has_ended() {
+                self.run_mods(Hook::ProgressTimeStatePre(&mut target_time), &mut feed);
             }
 
             match self.phase {
@@ -159,48 +188,22 @@ impl Game {
                     clear_finish_time,
                     point_bonus,
                 } if clear_finish_time <= target_time => {
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::LinesClearPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lines_clearing(&self.config, &mut self.state, clear_finish_time);
                     self.state.points += point_bonus;
                     self.state.time = clear_finish_time;
                     self.run_mods(Hook::LinesClearPost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
-
-                    // Check if game should end.
-                    if let Some((line_limit, is_win)) = self.config.game_limits.lines_cleared {
-                        if line_limit <= self.state.lineclears {
-                            // End game immediately.
-                            self.phase = Phase::GameEnd {
-                                cause: GameEndCause::Limit(Stat::LinesCleared(line_limit)),
-                                is_win,
-                            };
-                        }
-                    } else if let Some((points_limit, is_win)) =
-                        self.config.game_limits.points_scored
-                    {
-                        if points_limit <= self.state.points {
-                            // End game immediately.
-                            self.phase = Phase::GameEnd {
-                                cause: GameEndCause::Limit(Stat::PointsScored(points_limit)),
-                                is_win,
-                            };
-                        }
-                    }
-                    self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
                 }
 
                 // Piece spawning.
                 // - May move on to game over (BlockOut).
                 // - Normally: Move on to piece-in-play.
                 Phase::Spawning { spawn_time } if spawn_time <= target_time => {
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::SpawnPre(&mut target_time), &mut feed);
                     self.phase = do_spawn(&self.config, &mut self.state, spawn_time);
                     self.state.time = spawn_time;
                     self.run_mods(Hook::SpawnPost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece being manipulated by player.
@@ -218,7 +221,6 @@ impl Game {
                     // SAFETY: `player_input.is_some()`.
                     let input = unsafe { player_input.take().unwrap_unchecked() };
 
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::PlayerActionPre(input, &mut target_time), &mut feed);
                     let updated_active_buttons =
                         calc_updated_active_buttons(self.state.active_buttons, input, target_time);
@@ -238,7 +240,6 @@ impl Game {
                     self.state.time = target_time;
                     self.state.active_buttons = updated_active_buttons;
                     self.run_mods(Hook::PlayerActionPost(input), &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece shifting autonomously.
@@ -249,8 +250,7 @@ impl Game {
                     lock_cap_time,
                     lowest_y,
                 } if autoshift_time <= target_time && autoshift_time <= fall_or_lock_time => {
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
-                    self.run_mods(Hook::AutoMovePre(&mut target_time), &mut feed);
+                    self.run_mods(Hook::AutoShiftPre(&mut target_time), &mut feed);
                     self.phase = do_autonomous_shift(
                         &self.config,
                         &mut self.state,
@@ -261,8 +261,7 @@ impl Game {
                         lowest_y,
                     );
                     self.state.time = autoshift_time;
-                    self.run_mods(Hook::AutoMovePost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+                    self.run_mods(Hook::AutoShiftPost, &mut feed);
                 }
 
                 // Piece falling.
@@ -273,7 +272,6 @@ impl Game {
                     lock_cap_time,
                     lowest_y,
                 } if fall_time <= target_time && piece.is_airborne(&self.state.board) => {
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::FallPre(&mut target_time), &mut feed);
                     self.phase = do_fall(
                         &self.config,
@@ -286,7 +284,6 @@ impl Game {
                     );
                     self.state.time = fall_time;
                     self.run_mods(Hook::FallPost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
                 }
 
                 // Piece locking.
@@ -297,32 +294,17 @@ impl Game {
                     lock_cap_time: _,
                     lowest_y: _,
                 } if lock_time <= target_time => {
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     self.run_mods(Hook::LockPre(&mut target_time), &mut feed);
                     self.phase =
                         do_lock(&self.config, &mut self.state, piece, lock_time, &mut feed);
                     self.state.time = lock_time;
                     self.run_mods(Hook::LockPost, &mut feed);
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
-
-                    if let Some((pieces_limit, is_win)) = self.config.game_limits.pieces_locked {
-                        if pieces_limit <= self.state.pieces_locked.iter().sum() {
-                            // End game immediately.
-                            self.phase = Phase::GameEnd {
-                                cause: GameEndCause::Limit(Stat::PiecesLocked(pieces_limit)),
-                                is_win,
-                            };
-                        }
-                    }
-                    self.run_mods(Hook::CheckGameLimitsPost, &mut feed);
                 }
 
                 // No actions within update target horizon, stop updating.
                 // Return from update due to target time reached.
                 _ => {
                     // Ensure states are updated.
-                    // Ensure time is updated as requested, even when none of above cases triggered.
-                    self.run_mods(Hook::TimeStateProgressionPre(&mut target_time), &mut feed);
                     // NOTE: Ensure buttons are still updated by inputs as requested,
                     // even when `PieceInPlay` case was not triggered (e.g. during `LinesClearing`).
                     if let Some(input) = player_input {
@@ -332,12 +314,15 @@ impl Game {
                             target_time,
                         );
                     }
+                    // Ensure time is updated as requested, even when none of above cases triggered.
                     // NOTE: This *might* be redundant in some cases.
                     self.state.time = target_time;
-                    self.run_mods(Hook::TimeStateProgressionPost, &mut feed);
+                    self.run_mods(Hook::ProgressTimeStatePost, &mut feed);
                     return Ok(feed);
                 }
             }
+
+            self.run_mods(Hook::ProgressTimeStatePost, &mut feed);
         }
     }
 }

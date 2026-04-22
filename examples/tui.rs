@@ -3,10 +3,11 @@
 use std::time::{Duration, Instant};
 
 use crossterm::{
+    ExecutableCommand,
     cursor::MoveTo,
     event::{self, KeyCode},
     style::Print,
-    terminal, ExecutableCommand,
+    terminal,
 };
 use falling_tetromino_engine::{Button, Game, GameLimits, Input, Phase, Stat, UpdateGameError};
 

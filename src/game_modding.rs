@@ -21,16 +21,17 @@ pub struct GameAccess<'a> {
 pub(crate) enum Hook<'a> {
     GameBuilt,
     GameEnded,
-    PlayerInputReceived(&'a mut InGameTime, &'a mut Option<Input>),
-    TimeStateProgressionPre(&'a mut InGameTime),
-    TimeStateProgressionPost,
+    ReceivePlayerInput(&'a mut InGameTime, &'a mut Option<Input>),
+    ProgressTimeStatePre(&'a mut InGameTime),
+    ProgressTimeStatePost,
+    CheckGameLimitsPre,
     CheckGameLimitsPost,
     SpawnPre(&'a mut InGameTime),
     SpawnPost,
     PlayerActionPre(Input, &'a mut InGameTime),
     PlayerActionPost(Input),
-    AutoMovePre(&'a mut InGameTime),
-    AutoMovePost,
+    AutoShiftPre(&'a mut InGameTime),
+    AutoShiftPost,
     FallPre(&'a mut InGameTime),
     FallPost,
     LockPre(&'a mut InGameTime),
@@ -57,14 +58,15 @@ impl Game {
             };
             match &mut hook_point {
                 Hook::GameBuilt => modify.on_game_built(game),
-                Hook::GameEnded => modify.on_game_ended(game, feed),
-                Hook::PlayerInputReceived(time, player_input) => {
-                    modify.on_player_input_received(game, feed, time, player_input)
+                Hook::GameEnded => modify.on_game_end(game, feed),
+                Hook::ReceivePlayerInput(time, player_input) => {
+                    modify.on_receive_player_input(game, feed, time, player_input)
                 }
-                Hook::TimeStateProgressionPre(time) => {
-                    modify.on_time_state_progression_pre(game, feed, time)
+                Hook::ProgressTimeStatePre(time) => {
+                    modify.on_progress_time_state_pre(game, feed, time)
                 }
-                Hook::TimeStateProgressionPost => modify.on_time_state_progression_post(game, feed),
+                Hook::ProgressTimeStatePost => modify.on_progress_time_state_post(game, feed),
+                Hook::CheckGameLimitsPre => modify.on_check_game_limits_pre(game, feed),
                 Hook::CheckGameLimitsPost => modify.on_check_game_limits_post(game, feed),
                 Hook::SpawnPre(time) => modify.on_spawn_pre(game, feed, time),
                 Hook::SpawnPost => modify.on_spawn_post(game, feed),
@@ -72,8 +74,8 @@ impl Game {
                     modify.on_player_action_pre(game, feed, *input, time)
                 }
                 Hook::PlayerActionPost(input) => modify.on_player_action_post(game, feed, *input),
-                Hook::AutoMovePre(time) => modify.on_autoshift_pre(game, feed, time),
-                Hook::AutoMovePost => modify.on_autoshift_post(game, feed),
+                Hook::AutoShiftPre(time) => modify.on_autoshift_pre(game, feed, time),
+                Hook::AutoShiftPost => modify.on_autoshift_post(game, feed),
                 Hook::FallPre(time) => modify.on_fall_pre(game, feed, time),
                 Hook::FallPost => modify.on_fall_post(game, feed),
                 Hook::LockPre(time) => modify.on_lock_pre(game, feed, time),
@@ -149,7 +151,7 @@ pub trait GameModifier: std::fmt::Debug {
     /// This function gets called anytime [`Game::update`] is called with `Some` actual [`Input`].
     ///
     /// Note that the `&mut Option<Input>` allows this call to [`Option::take`] the input and nullify it.
-    fn on_player_input_received(
+    fn on_receive_player_input(
         &mut self,
         _game: GameAccess,
         _feed: &mut NotificationFeed,
@@ -162,10 +164,10 @@ pub trait GameModifier: std::fmt::Debug {
     fn on_game_built(&mut self, _game: GameAccess) {}
 
     /// This function gets called once, when the game has entered [`Phase::GameEnd`].
-    fn on_game_ended(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
+    fn on_game_end(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
 
     /// This function gets called anytime and immediately before any step inside the engine is applied which will update the game state in a way where time is moved forward.
-    fn on_time_state_progression_pre(
+    fn on_progress_time_state_pre(
         &mut self,
         _game: GameAccess,
         _feed: &mut NotificationFeed,
@@ -173,7 +175,10 @@ pub trait GameModifier: std::fmt::Debug {
     ) {
     }
     /// This function gets called anytime and immediately after any step inside the engine is applied which will update the game state in a way where time has been moved forward.
-    fn on_time_state_progression_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
+    fn on_progress_time_state_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
+
+    /// This function gets called immediately bfore the engine checks all its limiting stats and possibly ends.
+    fn on_check_game_limits_pre(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately after the engine has checked all its limiting stats and possibly ended.
     fn on_check_game_limits_post(&mut self, _game: GameAccess, _feed: &mut NotificationFeed) {}

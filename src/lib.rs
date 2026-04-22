@@ -119,7 +119,7 @@ pub mod tetromino_generation;
 
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
 
-use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
+use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
 
 pub use game_building::GameBuilder;
 pub use game_modding::{GameAccess, GameModifier};

@@ -585,7 +585,7 @@ pub enum Phase {
     /// In this state the board is as it was at the time of the piece locking down,
     /// i.e. with some horizontally completed lines.
     /// After exiting this state, the
-    LinesClearing {
+    ClearingLines {
         /// The in-game time at which the game moves on to the next `Phase.`
         clear_finish_time: InGameTime,
         /// The score bonus that will be earned once the lines are cleared out.

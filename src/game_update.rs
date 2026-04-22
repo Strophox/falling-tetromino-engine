@@ -19,7 +19,7 @@ impl Game {
         // Find the next autonomous game update.
         let mut update_time = match self.phase {
             Phase::GameEnd { .. } => return None,
-            Phase::LinesClearing {
+            Phase::ClearingLines {
                 clear_finish_time, ..
             } => clear_finish_time,
             Phase::Spawning { spawn_time } => spawn_time,
@@ -58,7 +58,7 @@ impl Game {
                 return Err(UpdateGameError::AlreadyEnded);
             }
 
-            Phase::Spawning { .. } | Phase::LinesClearing { .. } => None,
+            Phase::Spawning { .. } | Phase::ClearingLines { .. } => None,
             Phase::PieceInPlay { piece, .. } => Some(piece),
         };
 
@@ -155,7 +155,7 @@ impl Game {
 
                 // Lines clearing.
                 // Move on to spawning.
-                Phase::LinesClearing {
+                Phase::ClearingLines {
                     clear_finish_time,
                     point_bonus,
                 } if clear_finish_time <= target_time => {
@@ -1239,7 +1239,7 @@ fn do_lock(
 
     // 'Update' ActionState;
     // Lines must be cleared, enter line clearing state.
-    Phase::LinesClearing {
+    Phase::ClearingLines {
         clear_finish_time: lock_time.saturating_add(config.line_clear_duration),
         point_bonus,
     }

@@ -127,13 +127,21 @@ pub use helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
 pub use piece_rotation::RotationSystem;
 pub use tetromino_generation::TetrominoGenerator;
 
+/// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
+pub const HEIGHT: usize = LOCK_OUT_HEIGHT + 7;
+/// The game field width.
+pub const WIDTH: usize = 10;
+/// The height of the (conventionally) visible playing grid that can be played in.
+/// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameEndCause::LockOut`]), although it may do so partially.
+pub const LOCK_OUT_HEIGHT: usize = 20;
+
 /// Abstract identifier for which type of tile occupies a cell in the grid.
 pub type TileID = NonZeroU8;
 /// The type of horizontal lines of the playing grid.
-pub type Line = [Option<TileID>; Game::WIDTH];
+pub type Line = [Option<TileID>; WIDTH];
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 /// The type of the entire two-dimensional playing grid.
-pub type Board = [Line; Game::HEIGHT];
+pub type Board = [Line; HEIGHT];
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
 pub type Coordinate = (isize, isize);
 /// Coordinate offsets that can be [`CoordAdd::add`]ed to [`Coordinate`]s.
@@ -416,14 +424,14 @@ pub struct Configuration {
 /// This struct is used for game reproducibility.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct StateInitialization {
+pub struct StateInitialization<TetGen> {
     /// The value to seed the game's PRNG with.
     #[cfg_attr(feature = "serde", serde(rename = "seed"))]
     pub seed: u64,
 
     /// The method (and internal state) of tetromino generation used.
     #[cfg_attr(feature = "serde", serde(rename = "tetgen"))]
-    pub tetromino_generator: TetrominoGenerator,
+    pub tetromino_generator: TetGen,
 }
 
 /// Represents an abstract game input.
@@ -482,7 +490,7 @@ pub enum Input {
 /// * It is mutated by the `Game` itself.
 #[derive(Eq, PartialEq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct State {
+pub struct State<TetGen> {
     /// Current in-game time.
     pub time: InGameTime,
     /// The stores which buttons are considered active and since when.
@@ -490,7 +498,7 @@ pub struct State {
     /// The internal pseudo random number generator used.
     pub rng: GameRng,
     /// The method (and internal state) of tetromino generation used.
-    pub piece_generator: TetrominoGenerator,
+    pub piece_generator: TetGen,
     /// Upcoming pieces to be played.
     pub piece_preview: VecDeque<Tetromino>,
     /// Data about the piece being held. `true` denotes that the held piece can be swapped back in.
@@ -603,7 +611,7 @@ pub enum Phase {
 
 /// Main game struct representing a round of play.
 #[derive(Debug)]
-pub struct Game {
+pub struct Game<TetGen> {
     /// Some internal configuration options of the `Game`.
     ///
     /// # Reproducibility
@@ -612,9 +620,9 @@ pub struct Game {
     /// or supply the information manually / externally.
     pub config: Configuration,
 
-    state_init: StateInitialization,
+    state_init: StateInitialization<TetGen>,
 
-    state: State,
+    state: State<TetGen>,
 
     phase: Phase,
 
@@ -624,7 +632,7 @@ pub struct Game {
     /// The game does not detect changes to its modifiers.
     /// It is therefore the user's responsibility to either not change modifiers after the game has started,
     /// or supply the information manually / externally.
-    pub modifiers: Vec<Box<dyn GameModifier>>,
+    pub modifiers: Vec<Box<dyn GameModifier<TetGen>>>,
 }
 
 /// A number of feedback notifications that can be returned by the game.
@@ -656,7 +664,7 @@ pub enum Notification {
     /// The duration indicates the line clear delay the game was configured with at the time.
     LinesClearing {
         /// A list of height coordinates/indices and the lines themselves that were cleared.
-        lines: Vec<(usize, [TileID; Game::WIDTH])>,
+        lines: Vec<(usize, [TileID; WIDTH])>,
         /// Game time where lines started clearing.
         /// Starts simultaneously to when a piece was locked and successfully completed some horizontal [`Line`]s,
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].
@@ -772,10 +780,7 @@ impl Tetromino {
         Piece {
             tetromino: self,
             orientation: Orientation::N,
-            position: (
-                ((Game::WIDTH - tet_width) / 2) as isize,
-                Game::LOCK_OUT_HEIGHT as isize,
-            ),
+            position: (((WIDTH - tet_width) / 2) as isize, LOCK_OUT_HEIGHT as isize),
         }
     }
 
@@ -831,9 +836,9 @@ impl Piece {
     pub fn fits_on(&self, board: &Board) -> bool {
         self.tiles().iter().all(|&((x, y), _)| {
             0 <= x
-                && (x as usize) < Game::WIDTH
+                && (x as usize) < WIDTH
                 && 0 <= y
-                && (y as usize) < Game::HEIGHT
+                && (y as usize) < HEIGHT
                 && board[y as usize][x as usize].is_none()
         })
     }
@@ -1187,27 +1192,19 @@ impl Phase {
     }
 }
 
-impl Game {
-    /// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
-    pub const HEIGHT: usize = Self::LOCK_OUT_HEIGHT + 7;
-    /// The game field width.
-    pub const WIDTH: usize = 10;
-    /// The height of the (conventionally) visible playing grid that can be played in.
-    /// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameEndCause::LockOut`]), although it may do so partially.
-    pub const LOCK_OUT_HEIGHT: usize = 20;
-
+impl<TetGen> Game<TetGen> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
-    pub fn builder() -> GameBuilder {
+    pub fn builder() -> GameBuilder<TetGen> {
         GameBuilder::default()
     }
 
     /// Read accessor for the game's initial values.
-    pub const fn state_init(&self) -> &StateInitialization {
+    pub const fn state_init(&self) -> &StateInitialization<TetGen> {
         &self.state_init
     }
 
     /// Read accessor for the current game state.
-    pub const fn state(&self) -> &State {
+    pub const fn state(&self) -> &State<TetGen> {
         &self.state
     }
 
@@ -1230,7 +1227,9 @@ impl Game {
             Stat::PointsScored(s) => s <= self.state.points,
         }
     }
+}
 
+impl<TetGen: Clone> Game<TetGen> {
     /// Try to create a cloned instance of the game.
     pub fn try_clone(&self) -> Result<Self, String> {
         let mut modifiers = Vec::new();
@@ -1240,7 +1239,7 @@ impl Game {
 
         Ok(Self {
             config: self.config.clone(),
-            state_init: self.state_init,
+            state_init: self.state_init.clone(),
             state: self.state.clone(),
             phase: self.phase.clone(),
             modifiers,

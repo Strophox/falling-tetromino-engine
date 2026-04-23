@@ -6,7 +6,7 @@ use crate::game_modding::Hook;
 
 use super::*;
 
-impl Game {
+impl<TetGen: TetrominoGenerator> Game<TetGen> {
     /// Retrieve the when the next *autonomous* in-game update is scheduled.
     /// I.e., compute the next time the game would change state assuming no button updates
     ///
@@ -327,19 +327,23 @@ impl Game {
     }
 }
 
-fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -> Phase {
+fn do_spawn<TetGen: TetrominoGenerator>(
+    config: &Configuration,
+    state: &mut State<TetGen>,
+    spawn_time: InGameTime,
+) -> Phase {
     // Take a tetromino.
     let next_tetromino = state.piece_preview.pop_front().unwrap_or_else(|| {
         state
             .piece_generator
-            .with_rng(&mut state.rng)
+            .using_rng(&mut state.rng)
             .next()
             .expect("piece generator empty before game end")
     });
 
     // Only put back in if necessary (e.g. if piece_preview_count < next_pieces.len()).
     state.piece_preview.extend(
-        state.piece_generator.with_rng(&mut state.rng).take(
+        state.piece_generator.using_rng(&mut state.rng).take(
             config
                 .generate_piece_preview
                 .saturating_sub(state.piece_preview.len()),
@@ -405,9 +409,9 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
         if tele_l != tele_r {
             // FIXME: Aw hell naw 💀 do we really need to pull in all of `itertools` just for conditionally `.rev()`ersing a range https://stackoverflow.com/questions/59467882/how-do-i-make-a-range-reverse-on-condition
             let xs: Vec<_> = if tele_l > tele_r {
-                (0..Game::WIDTH).collect()
+                (0..WIDTH).collect()
             } else {
-                (0..Game::WIDTH).rev().collect()
+                (0..WIDTH).rev().collect()
             };
 
             // Search for different position piece might fit.
@@ -481,9 +485,9 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_player_input(
+fn do_player_input<TetGen>(
     config: &Configuration,
-    state: &mut State,
+    state: &mut State<TetGen>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
     previous_fall_or_lock_time: InGameTime,
@@ -875,8 +879,8 @@ fn do_player_input(
     }
 }
 
-fn try_do_hold(
-    state: &mut State,
+fn try_do_hold<TetGen>(
+    state: &mut State<TetGen>,
     tetromino: Tetromino,
     next_spawn_time: InGameTime,
 ) -> Option<Phase> {
@@ -905,9 +909,9 @@ fn try_do_hold(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_autonomous_shift(
+fn do_autonomous_shift<TetGen>(
     config: &Configuration,
-    state: &mut State,
+    state: &mut State<TetGen>,
     previous_piece: Piece,
     autoshift_time: InGameTime,
     previous_fall_or_lock_time: InGameTime,
@@ -993,9 +997,9 @@ fn do_autonomous_shift(
     }
 }
 
-fn do_fall(
+fn do_fall<TetGen>(
     config: &Configuration,
-    state: &mut State,
+    state: &mut State<TetGen>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
     fall_time: InGameTime,
@@ -1113,9 +1117,9 @@ fn do_fall(
     }
 }
 
-fn do_lock(
+fn do_lock<TetGen>(
     config: &Configuration,
-    state: &mut State,
+    state: &mut State<TetGen>,
     piece: Piece,
     lock_time: InGameTime,
     feed: &mut NotificationFeed,
@@ -1131,7 +1135,7 @@ fn do_lock(
     let any_below_skyline = piece
         .tiles()
         .iter()
-        .any(|&((_, y), _)| (y as usize) < Game::LOCK_OUT_HEIGHT);
+        .any(|&((_, y), _)| (y as usize) < LOCK_OUT_HEIGHT);
 
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
     if !any_below_skyline {
@@ -1165,7 +1169,7 @@ fn do_lock(
 
     // Find lines which might get cleared by piece locking. (actual clearing done later).
     let mut cleared_lines = Vec::new();
-    for y in (0..Game::HEIGHT).rev() {
+    for y in (0..HEIGHT).rev() {
         if !state.board[y].contains(&None) {
             cleared_lines.push((y, state.board[y].map(Option::unwrap)));
         }
@@ -1230,18 +1234,18 @@ fn do_lock(
     }
 }
 
-fn do_lines_clearing(
+fn do_lines_clearing<TetGen>(
     config: &Configuration,
-    state: &mut State,
+    state: &mut State<TetGen>,
     clear_finish_time: InGameTime,
 ) -> Phase {
-    for y in (0..Game::HEIGHT).rev() {
+    for y in (0..HEIGHT).rev() {
         // Full line: move it to the cleared lines storage and push an empty line to the board.
         if state.board[y].iter().all(|tile| tile.is_some()) {
             // Starting from the offending line, we move down all others, then default the uppermost.
             state.board[y..].rotate_left(1);
             // FIXME: This could underflow.
-            state.board[Game::HEIGHT - 1] = Line::default();
+            state.board[HEIGHT - 1] = Line::default();
             state.lineclears += 1;
 
             // Increment level if update requested.
@@ -1370,9 +1374,9 @@ fn calc_isleftshift_activesince_isteleport(
     }
 }
 
-fn calc_next_autoshift_time(
+fn calc_next_autoshift_time<TetGen>(
     config: &Configuration,
-    state: &State,
+    state: &State<TetGen>,
     current_time: InGameTime,
     dir_active_since: InGameTime,
     is_teleport: bool,
@@ -1401,8 +1405,8 @@ fn calc_next_autoshift_time(
     current_time.saturating_add(shift_delay)
 }
 
-fn calc_next_fall_time(
-    state: &State,
+fn calc_next_fall_time<TetGen>(
+    state: &State<TetGen>,
     config: &Configuration,
     current_time: InGameTime,
     active_buttons: &ButtonsState,

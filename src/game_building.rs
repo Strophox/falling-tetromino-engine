@@ -17,29 +17,45 @@ use super::*;
 ///
 /// This will give you a [`Game`] as specified in the process that you can then use as normal.
 /// The `GameBuilder` is not used up and its configuration can be re-used to initialize more [`Game`]s.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug, Default)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameBuilder {
+pub struct GameBuilder<TetGen> {
     seed: Option<u64>,
-    tetromino_generator: TetrominoGenerator,
+    tetromino_generator: Option<TetGen>,
     config: Configuration,
 }
 
-impl GameBuilder {
+impl<TetGen> Default for GameBuilder<TetGen> {
+    fn default() -> Self {
+        Self {
+            seed: Default::default(),
+            tetromino_generator: Default::default(),
+            config: Default::default(),
+        }
+    }
+}
+
+impl<TetGen> GameBuilder<TetGen> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<TetGen: TetrominoGenerator + Clone> GameBuilder<TetGen> {
     /// Creates a [`Game`] with the information specified by `self`.
-    pub fn build(&self) -> Game {
+    pub fn build(&self) -> Game<TetGen> {
         self.build_modded(Vec::new())
     }
 
     /// Creates a [`Game`] with the information specified by `self` and some one-time `modifiers`.
-    pub fn build_modded(&self, modifiers: Vec<Box<dyn GameModifier>>) -> Game {
+    pub fn build_modded(&self, modifiers: Vec<Box<dyn GameModifier<TetGen>>>) -> Game<TetGen> {
         let seed = self.seed.unwrap_or_else(|| rand::rng().next_u64());
-        let tetromino_generator = self.tetromino_generator;
+        let mut rng = GameRng::seed_from_u64(seed);
+        let tetromino_generator = self
+            .tetromino_generator
+            .clone()
+            .unwrap_or_else(|| TetGen::from_rng(&mut rng));
         let config = self.config.clone();
 
         let fall_delay = config.fall_delay_params.calculate(0);
@@ -53,8 +69,8 @@ impl GameBuilder {
             state: State {
                 time: Duration::ZERO,
                 active_buttons: [None; Button::VARIANTS.len()],
-                rng: GameRng::seed_from_u64(seed),
-                piece_generator: tetromino_generator,
+                rng,
+                piece_generator: tetromino_generator.clone(),
                 piece_preview: VecDeque::new(),
                 piece_held: None,
                 board: Board::default(),
@@ -83,14 +99,14 @@ impl GameBuilder {
 }
 
 // Getting a `GameBuilder` blueprint back from an existing `Game`.
-impl Game {
+impl<TetGen: Clone> Game<TetGen> {
     /// Creates a blueprint [`GameBuilder`] and an iterator over current modifier identifiers ([`&str`]s) from which the exact game can potentially be rebuilt.
     ///
     /// Note that the `&str`s serve the *client* to identify the modifiers and reapply them onto the `GameBuilder`, as the base engine does not know how to do so.
-    pub fn blueprint(&self) -> (GameBuilder, Vec<(String, String)>) {
+    pub fn blueprint(&self) -> (GameBuilder<TetGen>, Vec<(String, String)>) {
         let builder = GameBuilder {
             seed: Some(self.state_init.seed),
-            tetromino_generator: self.state_init.tetromino_generator,
+            tetromino_generator: Some(self.state_init.tetromino_generator.clone()),
             config: self.config.clone(),
         };
 
@@ -101,7 +117,7 @@ impl Game {
 }
 
 // Gamebuilder: Setter methods.
-impl GameBuilder {
+impl<TetGen> GameBuilder<TetGen> {
     /// The value to seed the game's PRNG with.
     pub fn seed(&mut self, x: u64) -> &mut Self {
         self.seed = Some(x);
@@ -109,8 +125,8 @@ impl GameBuilder {
     }
 
     /// The method (and internal state) of tetromino generation used.
-    pub fn tetromino_generator(&mut self, x: TetrominoGenerator) -> &mut Self {
-        self.tetromino_generator = x;
+    pub fn tetromino_generator(&mut self, x: TetGen) -> &mut Self {
+        self.tetromino_generator = Some(x);
         self
     }
 

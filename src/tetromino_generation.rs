@@ -5,18 +5,32 @@ Random generation of [`Tetromino`]s.
 use std::num::NonZeroU32;
 
 use rand::{
-    self, Rng, RngExt,
+    self, RngExt,
     distr::{Distribution, weighted::WeightedIndex},
 };
 
-use crate::{ExtNonNegF64, Tetromino};
+use crate::{ExtNonNegF64, GameRng, Tetromino};
 
 /// Handles the information of which pieces to spawn during a game.
 ///
-/// To actually generate [`Tetromino`]s, the [`TetrominoGenerator::with_rng`] method needs to be used to yield an [`Iterator`].
+/// To actually generate [`Tetromino`]s, the [`TetGenerator::with_rng`] method needs to be used to yield something that is an [`Iterator`].
+pub trait TetrominoGenerator {
+    /// The type returned by [`TetGenerator::with_rng`].
+    type UsingRng<'a>: Iterator<Item = Tetromino> + 'a
+    where
+        Self: 'a;
+
+    /// Method to construct and initialize the `TetrominoGenerator`.
+    fn from_rng(rng: &mut GameRng) -> Self;
+
+    /// Method that allows `TetrominoGenerator` to be used as [`Iterator`].
+    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> Self::UsingRng<'a>;
+}
+
+/// Standard tetromino generator implementations.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TetrominoGenerator {
+pub enum StdTetGen {
     /// Uniform random piece generator that might try to avoid repetition at least once.
     Classic {
         /// The tetromino that was last generated.
@@ -77,13 +91,7 @@ pub enum TetrominoGenerator {
     },
 }
 
-impl Default for TetrominoGenerator {
-    fn default() -> Self {
-        Self::snappy_recency()
-    }
-}
-
-impl TetrominoGenerator {
+impl StdTetGen {
     /// Initialize a uniformly random generator variant.
     pub const fn uniform() -> Self {
         Self::Classic {
@@ -125,30 +133,37 @@ impl TetrominoGenerator {
             tets_relative_tallies: [0; Tetromino::VARIANTS.len()],
         }
     }
+}
 
-    /// Method that allows `TetrominoGenerator` to be used as [`Iterator`].
-    pub fn with_rng<'a, 'b, R: Rng>(&'a mut self, rng: &'b mut R) -> WithRng<'a, 'b, R> {
-        WithRng {
+/// Struct produced from [`TetrominoGenerator::using_rng`] which implements [`Iterator`].
+pub struct StdUsingRng<'a> {
+    /// Selected tetromino generator to use as information source.
+    pub tetromino_generator: &'a mut StdTetGen,
+    /// Thread random number generator for raw soure of randomness.
+    pub rng: &'a mut GameRng,
+}
+
+impl TetrominoGenerator for StdTetGen {
+    type UsingRng<'a> = StdUsingRng<'a>;
+
+    fn from_rng(_rng: &mut GameRng) -> Self {
+        Self::snappy_recency()
+    }
+
+    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> StdUsingRng<'a> {
+        StdUsingRng {
             tetromino_generator: self,
             rng,
         }
     }
 }
 
-/// Struct produced from [`TetrominoGenerator::with_rng`] which implements [`Iterator`].
-pub struct WithRng<'a, 'b, R: Rng> {
-    /// Selected tetromino generator to use as information source.
-    pub tetromino_generator: &'a mut TetrominoGenerator,
-    /// Thread random number generator for raw soure of randomness.
-    pub rng: &'b mut R,
-}
-
-impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
+impl<'a> Iterator for StdUsingRng<'a> {
     type Item = Tetromino;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.tetromino_generator {
-            TetrominoGenerator::Classic {
+            StdTetGen::Classic {
                 tet_last_emitted,
                 aversion_to_last,
             } => {
@@ -168,7 +183,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 Some(new_tet)
             }
 
-            TetrominoGenerator::Stock {
+            StdTetGen::Stock {
                 tets_stocked,
                 restock_multiplicity,
             } => {
@@ -195,7 +210,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 Some(Tetromino::VARIANTS[idx])
             }
 
-            TetrominoGenerator::BalanceOut {
+            StdTetGen::BalanceOut {
                 tets_relative_tallies,
             } => {
                 // SAFETY: `self.relative_counts` always has a minimum.
@@ -223,7 +238,7 @@ impl<'a, 'b, R: Rng> Iterator for WithRng<'a, 'b, R> {
                 Some(Tetromino::VARIANTS[idx])
             }
 
-            TetrominoGenerator::Recency {
+            StdTetGen::Recency {
                 tets_last_emitted,
                 factor,
                 is_base_not_exp,

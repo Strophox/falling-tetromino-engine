@@ -2,7 +2,7 @@
 name = "falling-tetromino-engine"
 version = "9.0.0"
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.95.0"
 authors = ["Lucas Werner"]
 license = "MIT"
 description = "A tetromino stacker engine with goals of being featureful, efficient and elegant."

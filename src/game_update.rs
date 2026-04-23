@@ -28,20 +28,20 @@ impl Game {
                 fall_or_lock_time,
                 ..
             } => 'exp: {
-                if let Some(autoshift_time) = autoshift_scheduled {
-                    if autoshift_time < fall_or_lock_time {
-                        break 'exp autoshift_time;
-                    }
+                if let Some(autoshift_time) = autoshift_scheduled
+                    && autoshift_time < fall_or_lock_time
+                {
+                    break 'exp autoshift_time;
                 }
                 fall_or_lock_time
             }
         };
 
         // Check against time-related end conditions.
-        if let Some((time_limit, _)) = self.config.game_limits.time_elapsed {
-            if time_limit < update_time {
-                update_time = time_limit;
-            }
+        if let Some((time_limit, _)) = self.config.game_limits.time_elapsed
+            && time_limit < update_time
+        {
+            update_time = time_limit;
         }
 
         Some(update_time)
@@ -213,17 +213,17 @@ impl Game {
                     fall_or_lock_time,
                     lock_cap_time: lock_time_cap,
                     lowest_y,
-                } if player_input.is_some()
+                } if let Some(input) = player_input
                     && target_time <= fall_or_lock_time
                     && autoshift_scheduled
                         .is_none_or(|autoshift_time| target_time <= autoshift_time) =>
                 {
-                    // SAFETY: `player_input.is_some()`.
-                    let input = unsafe { player_input.take().unwrap_unchecked() };
-
                     self.run_mods(Hook::PlayerActionPre(input, &mut target_time), &mut feed);
+                    // Make sure the input cannot be processed again in this same update call.
+                    player_input.take();
                     let updated_active_buttons =
                         calc_updated_active_buttons(self.state.active_buttons, input, target_time);
+
                     self.phase = do_player_input(
                         &self.config,
                         &mut self.state,
@@ -368,10 +368,10 @@ fn do_spawn(config: &Configuration, state: &mut State, spawn_time: InGameTime) -
     // Optionally apply initial actions to spawn piece.
     if config.allow_spawn_manipulation {
         // "Initial Hold System".
-        if state.active_buttons[Button::HoldPiece].is_some() {
-            if let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time) {
-                return next_phase;
-            }
+        if state.active_buttons[Button::HoldPiece].is_some()
+            && let Some(next_phase) = try_do_hold(state, next_tetromino, spawn_time)
+        {
+            return next_phase;
         }
 
         // "Initial Rotation System".
@@ -1245,7 +1245,10 @@ fn do_lines_clearing(
             state.lineclears += 1;
 
             // Increment level if update requested.
-            if state.lineclears % config.update_delays_every_n_lineclears == 0 {
+            if state
+                .lineclears
+                .is_multiple_of(config.update_delays_every_n_lineclears)
+            {
                 // Calculate new fall- and lock delay for game state.
                 (state.fall_delay, state.lock_delay) = calc_fall_and_lock_delay(
                     &config.fall_delay_params,
@@ -1386,13 +1389,13 @@ fn calc_next_autoshift_time(
             config.delayed_auto_shift
         };
 
-    if config.ensure_shift_delay_lt_lock_delay && !is_airborne {
-        if let ExtDuration::Finite(lock_delay) = state.lock_delay {
-            if shift_delay > lock_delay {
-                // Ensure moves occur faster than locks.
-                shift_delay = lock_delay
-            }
-        }
+    if config.ensure_shift_delay_lt_lock_delay
+        && !is_airborne
+        && let ExtDuration::Finite(lock_delay) = state.lock_delay
+        && shift_delay > lock_delay
+    {
+        // Ensure moves occur faster than locks.
+        shift_delay = lock_delay
     }
 
     current_time.saturating_add(shift_delay)

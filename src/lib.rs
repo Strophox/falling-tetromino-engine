@@ -405,11 +405,11 @@ pub enum GameEndCause {
         blocked_piece: Piece,
     },
 
-    // 'Top out' denotes a number of new lines being unable to enter the existing board.
+    // 'Buffer out' denotes a number of new lines being unable to enter the existing board.
     /// This is currently unused in the base engine.
-    TopOut {
+    BufferOut {
         /// The lines that got pushed out and did not fit on the board anymore.
-        top_lines: Vec<Line>,
+        overflowing_lines: Vec<Line>,
     },
 
     /// Game over by having reached a [`Stat`] limit.
@@ -725,7 +725,7 @@ impl std::fmt::Display for GameEndCause {
         let s = match self {
             GameEndCause::LockOut { .. } => "Lock out",
             GameEndCause::BlockOut { .. } => "Block out",
-            GameEndCause::TopOut { .. } => "Top out",
+            GameEndCause::BufferOut { .. } => "Buffer out",
             GameEndCause::Limit(stat) => match stat {
                 Stat::TimeElapsed(_) => "Time limit reached",
                 Stat::PiecesLocked(_) => "Piece limit reached",

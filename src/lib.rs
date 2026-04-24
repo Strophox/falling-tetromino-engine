@@ -159,15 +159,15 @@ pub type GameRng = ChaCha8Rng;
 pub type NotificationFeed = Vec<(Notification, InGameTime)>;
 
 /// Standard export of the more generic [`game_core::Configuration`] type.
-pub type Configuration = game_core::Configuration<StdPceRot>;
+pub type Configuration = game_core::Configuration;
 /// Standard export of the more generic [`game_core::StateInitialization`] type.
-pub type StateInitialization = game_core::StateInitialization<StdTetGen>;
+pub type StateInitialization = game_core::StateInitialization;
 /// Standard export of the more generic [`game_core::State`] type.
-pub type State = game_core::State<StdTetGen>;
+pub type State = game_core::State;
 /// Standard export of the more generic [`game_core::Phase`] type.
 pub type Phase = game_core::Phase;
 /// Standard export of the more generic [`game_core::Game`] type.
-pub type Game = game_core::Game<StdTetGen>;
+pub type Game = game_core::Game;
 
 /// Represents one of the seven "Tetrominos";
 ///

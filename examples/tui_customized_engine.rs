@@ -140,7 +140,7 @@ struct UniformGenerator;
 
 impl TetrominoGenerator for UniformGenerator {
     fn from_rng(_rng: &mut GameRng) -> Self {
-        // We don't need rng to randomize the initial state of this generator.
+        // We don't need rng to randomize the initial state of this generator, since it has no state.
         UniformGenerator
     }
 

@@ -14,7 +14,7 @@ use super::*;
 /// or supply the information manually / externally.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Configuration<PceRot> {
+pub struct Configuration<PceRot = StdPceRot> {
     /// How many pieces should be pre-generated and accessible/visible in the game state.
     #[cfg_attr(feature = "serde", serde(rename = "preview"))]
     pub generate_piece_preview: usize,

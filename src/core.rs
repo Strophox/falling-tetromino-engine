@@ -430,7 +430,7 @@ pub struct Configuration<PceRot = StdPceRot> {
     #[cfg_attr(feature = "serde", serde(rename = "fall_curve"))]
     pub fall_delay_curve: Either<DelayParameters, DelayTable>,
 
-    /// How soft drop should speed up the falling of a piece should speed up while [`Button::SoftDrop`] is held.
+    /// How soft drop should speed up the falling of a piece should speed up while [`Button::DropSoft`] is held.
     /// - One variant describes a *factor*: How many times faster than the current gravity falling should be.
     /// - The other variant describes an *upper bound*: The fall delay that should be used, if it is shorter than current gravity. Otherwise no change.
     #[cfg_attr(feature = "serde", serde(rename = "sdf"))]

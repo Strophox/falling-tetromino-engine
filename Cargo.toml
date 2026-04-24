@@ -27,9 +27,8 @@ serde = ["dep:serde"]
 rand_chacha = { version = "0.10.0", features = ["serde"] }
 # Expose more PRNG helpers: "Choosing a thread_random() game seed if none is specified."
 rand = "0.10.0"
-
+either = { version = "1.15.0", features = ["serde"]}
 serde = { version = "1.0", features = ["derive"], optional = true }
-either = "1.15.0"
 
 [dev-dependencies]
 crossterm = "0.29.0"

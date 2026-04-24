@@ -192,7 +192,7 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self.config.fall_delay_curve = x;
         self
     }
-    /// How soft drop should speed up the falling of a piece should speed up while [`Button::SoftDrop`] is held.
+    /// How soft drop should speed up the falling of a piece should speed up while [`Button::DropSoft`] is held.
     /// - One variant describes how many times faster than the current gravity falling should be.
     /// - The other variant describes the fall delay that should be used, if it is faster than current gravity. Otherwise no change.
     pub fn soft_drop_speedup(&mut self, x: Either<ExtNonNegF64, ExtDuration>) -> &mut Self {

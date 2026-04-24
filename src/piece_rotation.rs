@@ -58,6 +58,7 @@ impl PieceRotator for StdPceRot {
 
 /// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClassicLRot;
 
 impl PieceRotator for ClassicLRot {
@@ -72,6 +73,7 @@ impl PieceRotator for ClassicLRot {
 
 /// The right-handed variant of the classic, kick-less rotation system, e.g. used in the NES version.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClassicRRot;
 
 impl PieceRotator for ClassicRRot {
@@ -140,6 +142,7 @@ fn classic_rotate(
 
 /// The Super Rotation System.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SuperRot;
 
 impl PieceRotator for SuperRot {
@@ -213,6 +216,7 @@ fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option
 
 /// The 'Ocular' rotation system.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OcularRot;
 
 impl PieceRotator for OcularRot {

@@ -129,6 +129,7 @@ impl<'a> Iterator for StdUsingRng<'a> {
 
 /// Uniform random piece generator that might try to avoid repetition at least once.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RerollGen {
     /// The tetromino that was last generated.
     #[cfg_attr(feature = "serde", serde(rename = "lasttet"))]
@@ -177,6 +178,7 @@ impl TetrominoGenerator for RerollGen {
 /// handing them out until a lower stock threshold is reached and restocked with `n` copies.
 /// A multiplicity of `1` and restock threshold of `0` corresponds to the common 7-Bag.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StockGen {
     /// The number of each  piece type left in the bag.
     #[cfg_attr(feature = "serde", serde(rename = "stocked"))]
@@ -229,6 +231,7 @@ impl TetrominoGenerator for StockGen {
 /// Experimental generator based off of how many times each [`Tetromino`] type has been seen
 /// so far, *relative* to the others.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BalanceOutGen {
     /// The relative number of times each piece type has been seen more/less than the others.
     ///
@@ -284,6 +287,7 @@ impl TetrominoGenerator for BalanceOutGen {
 /// used as the exponent of the last time the piece was seen. Note that this makes it impossible
 /// for a piece that was just played (index `0`) to be played again.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecencyGen {
     /// The last time a piece was seen.
     ///

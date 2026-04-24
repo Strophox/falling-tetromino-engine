@@ -106,6 +106,7 @@ impl<TetGen, PceRot> Game<TetGen, PceRot> {
 ///     and turn the active piece into `Tetromino::O` for certain values.
 pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug {
     /// Convention to identify a mod by name.
+    // FIXME: This could be -> Cow<String, 'a> or a type determined by user.
     fn id(&self) -> String;
 
     /// Convention to reconstruct an identified mod's starting configuration.
@@ -135,7 +136,12 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
     ///
     /// let initial_config = serde_json::from_str(cfg);
     /// ```
+    // FIXME: This could be -> Cow<String, 'a> or a type determined by user.
     fn cfg(&self) -> String;
+
+    /// This method allows a modifier to provide access to internal state the modifier would like to display.
+    // FIXME: This could be more general (e.g. key-value store-like type) or a type determined by user.
+    fn stats(&self) -> &[&str];
 
     /// Try to clone the modifier if possible.
     /// Otherwise return an error.
@@ -272,5 +278,211 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
         _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
     ) {
+    }
+}
+
+/// A debug modifier implementation.
+#[derive(Debug)]
+pub struct DebugMod;
+
+impl<TetGen, PceRot> GameModifier<TetGen, PceRot> for DebugMod {
+    fn id(&self) -> String {
+        stringify!(DebugMod).to_owned()
+    }
+
+    fn cfg(&self) -> String {
+        "".to_owned()
+    }
+
+    fn stats(&self) -> &[&str] {
+        &[]
+    }
+
+    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen, PceRot>>, String> {
+        Ok(Box::new(DebugMod))
+    }
+
+    fn on_receive_player_input(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+        _player_input: &mut Option<Input>,
+    ) {
+        feed.push((
+            Notification::Custom("on_receive_player_input".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_game_built(&mut self, _game: GameAccess<TetGen, PceRot>) {}
+
+    fn on_game_end(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
+        feed.push((
+            Notification::Custom("on_game_end".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_progress_time_state_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_progress_time_state_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_progress_time_state_post(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+    ) {
+        feed.push((
+            Notification::Custom("on_progress_time_state_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_check_game_limits_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+    ) {
+        feed.push((
+            Notification::Custom("on_check_game_limits_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_check_game_limits_post(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+    ) {
+        feed.push((
+            Notification::Custom("on_check_game_limits_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_spawn_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_spawn_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_spawn_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
+        feed.push((
+            Notification::Custom("on_spawn_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_player_action_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _input: Input,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_player_action_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_player_action_post(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _input: Input,
+    ) {
+        feed.push((
+            Notification::Custom("on_player_action_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_autoshift_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_autoshift_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_autoshift_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
+        feed.push((
+            Notification::Custom("on_autoshift_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_fall_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_fall_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_fall_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
+        feed.push((
+            Notification::Custom("on_fall_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_lock_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_lock_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_lock_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
+        feed.push((
+            Notification::Custom("on_lock_post".to_owned()),
+            game.state.time,
+        ));
+    }
+
+    fn on_lines_clear_pre(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+        _time: &mut InGameTime,
+    ) {
+        feed.push((
+            Notification::Custom("on_lines_clear_pre".to_owned()),
+            game.state.time,
+        ));
+    }
+    fn on_lines_clear_post(
+        &mut self,
+        game: GameAccess<TetGen, PceRot>,
+        feed: &mut NotificationFeed,
+    ) {
+        feed.push((
+            Notification::Custom("on_lines_clear_post".to_owned()),
+            game.state.time,
+        ));
     }
 }

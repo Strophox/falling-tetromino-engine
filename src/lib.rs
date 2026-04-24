@@ -471,11 +471,6 @@ pub enum Notification {
         is_win: bool,
     },
 
-    /// A message containing debug information.
-    ///
-    /// This feedback type is only generated on [`NotificationLevel::Debug`]
-    Debug(String),
-
     /// Generic text feedback message.
     ///
     /// This is currently unused in the base engine.

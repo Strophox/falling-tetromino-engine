@@ -29,7 +29,7 @@ pub struct GameBuilder<TetGen = StdTetGen, PceRot = StdPceRot> {
     config: Configuration<PceRot>,
 }
 
-impl<TetGen> Default for GameBuilder<TetGen> {
+impl<TetGen, PceRot: Default> Default for GameBuilder<TetGen, PceRot> {
     fn default() -> Self {
         Self {
             seed: Default::default(),
@@ -39,21 +39,24 @@ impl<TetGen> Default for GameBuilder<TetGen> {
     }
 }
 
-impl<TetGen> GameBuilder<TetGen> {
+impl<TetGen, PceRot: Default> GameBuilder<TetGen, PceRot> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<TetGen: TetrominoGenerator + Clone> GameBuilder<TetGen> {
+impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceRot> {
     /// Creates a [`Game`] with the information specified by `self`.
-    pub fn build(&self) -> Game<TetGen> {
+    pub fn build(&self) -> Game<TetGen, PceRot> {
         self.build_modded(Vec::new())
     }
 
     /// Creates a [`Game`] with the information specified by `self` and some one-time `modifiers`.
-    pub fn build_modded(&self, modifiers: Vec<Box<dyn GameModifier<TetGen>>>) -> Game<TetGen> {
+    pub fn build_modded(
+        &self,
+        modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot>>>,
+    ) -> Game<TetGen, PceRot> {
         let seed = self.seed.unwrap_or_else(|| rand::rng().next_u64());
         let mut rng = GameRng::seed_from_u64(seed);
         let tetromino_generator = self

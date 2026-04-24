@@ -7,7 +7,7 @@ use rand_chacha::ChaCha8Rng;
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
 
 /// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
-pub const HEIGHT: usize = LOCK_OUT_HEIGHT + 7;
+pub const HEIGHT: usize = 32;
 /// The game field width.
 pub const WIDTH: usize = 10;
 /// The height of the (conventionally) visible playing grid that can be played in.

@@ -38,10 +38,10 @@ pub enum StdPceRot {
 impl PieceRotator for StdPceRot {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         match self {
-            StdPceRot::Ocular => OcularRotation.rotate(piece, board, right_turns),
-            StdPceRot::ClassicL => ClassicLRotation.rotate(piece, board, right_turns),
-            StdPceRot::ClassicR => ClassicRRotation.rotate(piece, board, right_turns),
-            StdPceRot::Super => SuperRotation.rotate(piece, board, right_turns),
+            StdPceRot::Ocular => OcularRot.rotate(piece, board, right_turns),
+            StdPceRot::ClassicL => ClassicLRot.rotate(piece, board, right_turns),
+            StdPceRot::ClassicR => ClassicRRot.rotate(piece, board, right_turns),
+            StdPceRot::Super => SuperRot.rotate(piece, board, right_turns),
         }
     }
 
@@ -57,9 +57,10 @@ impl PieceRotator for StdPceRot {
 }
 
 /// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
-pub struct ClassicLRotation;
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+pub struct ClassicLRot;
 
-impl PieceRotator for ClassicLRotation {
+impl PieceRotator for ClassicLRot {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         classic_rotate(piece, Some(board), right_turns, true)
     }
@@ -70,9 +71,10 @@ impl PieceRotator for ClassicLRotation {
 }
 
 /// The right-handed variant of the classic, kick-less rotation system, e.g. used in the NES version.
-pub struct ClassicRRotation;
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+pub struct ClassicRRot;
 
-impl PieceRotator for ClassicRRotation {
+impl PieceRotator for ClassicRRot {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         classic_rotate(piece, Some(board), right_turns, false)
     }
@@ -137,9 +139,10 @@ fn classic_rotate(
 }
 
 /// The Super Rotation System.
-pub struct SuperRotation;
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+pub struct SuperRot;
 
-impl PieceRotator for SuperRotation {
+impl PieceRotator for SuperRot {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         super_rotate(piece, Some(board), right_turns)
     }
@@ -209,9 +212,10 @@ fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option
 }
 
 /// The 'Ocular' rotation system.
-pub struct OcularRotation;
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
+pub struct OcularRot;
 
-impl PieceRotator for OcularRotation {
+impl PieceRotator for OcularRot {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         ocular_rotate(piece, Some(board), right_turns)
     }

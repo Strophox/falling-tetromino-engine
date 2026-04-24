@@ -3,7 +3,7 @@ Handles what happens when [`Game::update`] is called.
 */
 
 use crate::{
-    game_core::{Configuration, Game, Phase, State},
+    core::{Configuration, Game, Phase, State},
     game_modding::Hook,
 };
 
@@ -446,7 +446,7 @@ fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
 
     let initial_fall_or_lock_time = spawn_time.saturating_add(if is_airborne {
         // Fall immediately.
-        Duration::ZERO
+        InGameTime::ZERO
     } else {
         state.lock_delay.saturating_duration()
     });
@@ -1265,7 +1265,7 @@ fn do_lines_clearing<TetGen, PceRot>(
                 );
 
                 // Remember the first time fall delay hit zero.
-                if state.fall_delay == config.fall_delay_params.lowerbound
+                if state.fall_delay == config.fall_delay_params.lowerbound()
                     && state.fall_delay_lowerbound_hit_at_n_lineclears.is_none()
                 {
                     state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
@@ -1388,7 +1388,7 @@ fn calc_next_autoshift_time<TetGen, PceRot>(
     let mut shift_delay =
         if current_time.saturating_sub(dir_active_since) >= config.delayed_auto_shift {
             if is_teleport {
-                Duration::ZERO
+                InGameTime::ZERO
             } else {
                 config.auto_repeat_rate
             }
@@ -1438,13 +1438,13 @@ fn calc_fall_and_lock_delay(
         // Actually compute new delay from equation.
         let lock_delay = lock_delay_params.calculate(lineclears - hit_at_n_lineclears);
 
-        (fall_delay_params.lowerbound, lock_delay)
+        (fall_delay_params.lowerbound(), lock_delay)
     } else {
         // Normally decrease fall delay.
 
         // Actually compute new delay from equation.
         let fall_delay = fall_delay_params.calculate(lineclears);
 
-        (fall_delay, lock_delay_params.base_delay)
+        (fall_delay, lock_delay_params.base_delay())
     }
 }

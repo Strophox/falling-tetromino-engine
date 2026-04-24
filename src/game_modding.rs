@@ -2,7 +2,7 @@
 Modding facilities for the engine.
 */
 
-use crate::game_core::{Configuration, Game, Phase, State, StateInitialization};
+use crate::core::{Configuration, Game, Phase, State, StateInitialization};
 
 use super::*;
 

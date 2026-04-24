@@ -11,13 +11,13 @@ use crossterm::{
 };
 use falling_tetromino_engine::{
     Board, Button, GameLimits, GameRng, Input, Phase, Piece, PieceRotator, Stat, Tetromino,
-    TetrominoGenerator, UpdateGameError, game_core,
+    TetrominoGenerator, UpdateGameError,
 };
 use rand::RngExt;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // NOTE: Here we re-define the *core* Game type using our own generator and rotators.
-    type Game = game_core::Game<UniformGenerator, DebugRotator>;
+    type Game = falling_tetromino_engine::core::Game<UniformGenerator, LazyRotator>;
 
     // Initialize game. In-game time starts at 0s.
     let mut game = Game::builder()
@@ -115,9 +115,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // (*Instead, it just relies on how the engine outputs raw piece offset data,
 // which is always aligned to bottom left coordinate of a piece.
 // For example, 'I' will always pivot around it lower left unit. Try it out!)
-struct DebugRotator;
+struct LazyRotator;
 
-impl PieceRotator for DebugRotator {
+impl PieceRotator for LazyRotator {
     fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         let rotated_piece = self.free_rotate(piece, right_turns);
         rotated_piece.fits_on(board).then_some(rotated_piece)

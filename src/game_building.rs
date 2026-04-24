@@ -2,10 +2,13 @@
 Customizing, templating and constructing [`Game`]s.
  */
 
+use std::collections::VecDeque;
+
 use rand::Rng;
+use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
-    game_core::{Configuration, Game, Phase, State, StateInitialization},
+    core::{Configuration, Game, Phase, State, StateInitialization},
     game_modding::Hook,
     tetromino_generation::StdTetGen,
 };
@@ -71,10 +74,10 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
         let mut game = Game {
             modifiers,
             phase: Phase::Spawning {
-                spawn_time: Duration::ZERO,
+                spawn_time: InGameTime::ZERO,
             },
             state: State {
-                time: Duration::ZERO,
+                time: InGameTime::ZERO,
                 active_buttons: [None; Button::VARIANTS.len()],
                 rng,
                 piece_generator: tetromino_generator.clone(),
@@ -83,7 +86,7 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
                 board: Board::default(),
                 fall_delay,
                 fall_delay_lowerbound_hit_at_n_lineclears: fall_delay
-                    .le(&config.fall_delay_params.lowerbound)
+                    .le(&config.fall_delay_params.lowerbound())
                     .then_some(0),
                 lock_delay,
                 pieces_locked: [0; Tetromino::VARIANTS.len()],
@@ -160,18 +163,18 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// How long the game should take to spawn a new piece.
-    pub fn spawn_delay(&mut self, x: Duration) -> &mut Self {
+    pub fn spawn_delay(&mut self, x: InGameTime) -> &mut Self {
         self.config.spawn_delay = x;
         self
     }
     /// How long it takes for the active piece to start automatically shifting more to the side
     /// after the initial time a 'move' button has been pressed.
-    pub fn delayed_auto_shift(&mut self, x: Duration) -> &mut Self {
+    pub fn delayed_auto_shift(&mut self, x: InGameTime) -> &mut Self {
         self.config.delayed_auto_shift = x;
         self
     }
     /// How long it takes for automatic side movement to repeat once it has started.
-    pub fn auto_repeat_rate(&mut self, x: Duration) -> &mut Self {
+    pub fn auto_repeat_rate(&mut self, x: InGameTime) -> &mut Self {
         self.config.auto_repeat_rate = x;
         self
     }
@@ -210,7 +213,7 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// How long the game should take to clear a line.
-    pub fn line_clear_duration(&mut self, x: Duration) -> &mut Self {
+    pub fn line_clear_duration(&mut self, x: InGameTime) -> &mut Self {
         self.config.line_clear_duration = x;
         self
     }

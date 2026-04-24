@@ -4,7 +4,11 @@ Customizing, templating and constructing [`Game`]s.
 
 use rand::Rng;
 
-use crate::game_modding::Hook;
+use crate::{
+    game_core::{Configuration, Game, Phase, State, StateInitialization},
+    game_modding::Hook,
+    tetromino_generation::StdTetGen,
+};
 
 use super::*;
 
@@ -19,7 +23,7 @@ use super::*;
 /// The `GameBuilder` is not used up and its configuration can be re-used to initialize more [`Game`]s.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameBuilder<TetGen> {
+pub struct GameBuilder<TetGen = StdTetGen> {
     seed: Option<u64>,
     tetromino_generator: Option<TetGen>,
     config: Configuration,

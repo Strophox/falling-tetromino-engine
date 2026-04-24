@@ -9,13 +9,11 @@ use crossterm::{
     style::Print,
     terminal,
 };
-use falling_tetromino_engine::{
-    Button, Game, GameLimits, Input, Phase, Stat, UpdateGameError, tetromino_generation::StdTetGen,
-};
+use falling_tetromino_engine::{Button, Game, GameLimits, Input, Phase, Stat, UpdateGameError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize game. In-game time starts at 0s.
-    let mut game = Game::<StdTetGen>::builder()
+    let mut game = Game::builder()
         .seed(1234)
         .game_limits(GameLimits::single(Stat::LinesCleared(40), true))
         .build();

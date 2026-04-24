@@ -13,9 +13,9 @@ use crate::{ExtNonNegF64, GameRng, Tetromino};
 
 /// Handles the information of which pieces to spawn during a game.
 ///
-/// To actually generate [`Tetromino`]s, the [`TetGenerator::with_rng`] method needs to be used to yield something that is an [`Iterator`].
+/// To actually generate [`Tetromino`]s, the [`TetrominoGenerator::using_rng`] method needs to be used to yield something that is an [`Iterator`].
 pub trait TetrominoGenerator {
-    /// The type returned by [`TetGenerator::with_rng`].
+    /// The type returned by [`TetrominoGenerator::using_rng`].
     type UsingRng<'a>: Iterator<Item = Tetromino> + 'a
     where
         Self: 'a;
@@ -108,7 +108,7 @@ impl StdTetGen {
         }
     }
 
-    /// Initialize a typical 7-Bag instance of the [`TetrominoGenerator::Stock`] variant.
+    /// Initialize a typical 7-Bag instance of the [`StdTetGen::Stock`] variant.
     pub const fn bag() -> Self {
         Self::Stock {
             tets_stocked: [1; Tetromino::VARIANTS.len()],
@@ -116,7 +116,7 @@ impl StdTetGen {
         }
     }
 
-    /// Initialize a default instance of the [`TetrominoGenerator::Recency`] variant.
+    /// Initialize a default instance of the [`StdTetGen::Recency`] variant.
     pub const fn snappy_recency() -> Self {
         // SAFETY: `+0.0 <= 2.5`.
         let factor = unsafe { ExtNonNegF64::new_unchecked(2.5) };
@@ -127,7 +127,7 @@ impl StdTetGen {
         }
     }
 
-    /// Initialize an instance of the [`TetrominoGenerator::BalanceOut`] variant.
+    /// Initialize an instance of the [`StdTetGen::BalanceOut`] variant.
     pub const fn balance_out() -> Self {
         Self::BalanceOut {
             tets_relative_tallies: [0; Tetromino::VARIANTS.len()],

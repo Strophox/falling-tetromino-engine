@@ -2,10 +2,9 @@
 Modding facilities for the engine.
 */
 
-use crate::{
-    Configuration, Game, InGameTime, Input, Notification, NotificationFeed, NotificationLevel,
-    Phase, State, StateInitialization,
-};
+use crate::game_core::{Configuration, Game, Phase, State, StateInitialization};
+
+use super::*;
 
 /// Helper struct to enable [`GameModifier`]s to access to the game's internals.
 #[derive(PartialEq, Eq, Debug)]
@@ -104,14 +103,14 @@ impl<TetGen> Game<TetGen> {
 ///   which is the engine's internal PRNG source (used for reproducibility).
 /// * Only make visible changes that do not depend on special engine hook methods which can be
 ///   called a indeterminate number of times for a given game.
-///   In particular, [`GameModifier::on_time_state_progression_pre`]/[`GameModifier::on_time_state_progression_post`] should **not** be used to keep track of
+///   In particular, [`GameModifier::on_progress_time_state_pre`]/[`GameModifier::on_progress_time_state_post`] should **not** be used to keep track of
 ///   e.g. the number of times [`Game::update`] has been called specifically. For example:
 ///   - O.k.: Use time-related information to simulate the modifier's own events
 ///     which should happen at arbitrary but deterministic points on the engine timeline.
 ///     (e.g. the tetromino type is converted to `Tetromino::I` after 1s of `Piece` spawn.)
 ///   - **Not** O.k.: Keep track of the frontend's approximate framerate (by counting number of time update calls)
 ///     and turn the active piece into `Tetromino::O` for certain values.
-pub trait GameModifier<TetGen>: std::fmt::Debug {
+pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// Convention to identify a mod by name.
     fn id(&self) -> String;
 
@@ -260,7 +259,7 @@ pub trait GameModifier<TetGen>: std::fmt::Debug {
     /// This function gets called immediately after locking of the piece in [`Phase::PieceInPlay`] has been handled.
     fn on_lock_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
 
-    /// This function gets called immediately before [`Phase::LinesClearing`] is handled.
+    /// This function gets called immediately before [`Phase::ClearingLines`] is handled.
     fn on_lines_clear_pre(
         &mut self,
         _game: GameAccess<TetGen>,
@@ -268,6 +267,6 @@ pub trait GameModifier<TetGen>: std::fmt::Debug {
         _time: &mut InGameTime,
     ) {
     }
-    /// This function gets called immediately after [`Phase::LinesClearing`] has been handled.
+    /// This function gets called immediately after [`Phase::ClearingLines`] has been handled.
     fn on_lines_clear_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
 }

@@ -88,7 +88,7 @@ pub struct Configuration<PceRot = StdPceRot> {
 
     /// The amount of feedback information that is to be generated.
     #[cfg_attr(feature = "serde", serde(rename = "notifs"))]
-    pub notification_level: NotificationLevel,
+    pub send_notifications: bool,
 }
 
 /// Some values that were used to help initialize the game.
@@ -241,7 +241,7 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,
             game_limits: Default::default(),
-            notification_level: NotificationLevel::Standard,
+            send_notifications: true,
         }
     }
 }

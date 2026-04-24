@@ -662,7 +662,7 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
         I::Activate(B::DropHard) => {
             updated_piece = updated_piece.teleported(&state.board, (0, -1));
 
-            if config.notification_level != NotificationLevel::Silent {
+            if config.send_notifications {
                 feed.push((
                     Notification::HardDrop {
                         height_dropped: previous_piece
@@ -1156,7 +1156,7 @@ fn do_lock<TetGen, PceRot>(
         state.board[y as usize][x as usize] = Some(tile_id);
     }
 
-    if config.notification_level != NotificationLevel::Silent {
+    if config.send_notifications {
         feed.push((Notification::PieceLocked { piece }, lock_time));
     }
 
@@ -1207,7 +1207,7 @@ fn do_lock<TetGen, PceRot>(
         - 1
         + (combo - 1);
 
-    if config.notification_level != NotificationLevel::Silent {
+    if config.send_notifications {
         feed.push((
             Notification::LinesClearing {
                 lines: cleared_lines,

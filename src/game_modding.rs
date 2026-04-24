@@ -41,12 +41,6 @@ pub(crate) enum Hook<'a> {
 
 impl<TetGen, PceRot> Game<TetGen, PceRot> {
     pub(crate) fn run_mods(&mut self, mut hook_point: Hook, feed: &mut NotificationFeed) {
-        if self.config.notification_level == NotificationLevel::Debug {
-            feed.push((
-                Notification::Debug(format!("{hook_point:?}")),
-                self.state.time,
-            ));
-        }
         for modifier in &mut self.modifiers {
             let modify = modifier.as_mut();
             let game = GameAccess {

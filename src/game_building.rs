@@ -227,8 +227,8 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// The amount of feedback information that is to be generated.
-    pub fn notification_level(&mut self, x: NotificationLevel) -> &mut Self {
-        self.config.notification_level = x;
+    pub fn send_notifications(&mut self, x: bool) -> &mut Self {
+        self.config.send_notifications = x;
         self
     }
 }

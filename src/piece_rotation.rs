@@ -5,16 +5,28 @@ Rotation of tetromino [`Piece`]s.
 use crate::{Board, CoordAdd, Offset, Orientation, Piece, Tetromino};
 
 /// Handles the logic of how to rotate a tetromino in play.
+pub trait PieceRotator {
+    /// Tries to rotate a piece with the chosen `PieceRotator`.
+    ///
+    /// This will return `Some(new_piece)` if the `old_piece`, when rotated
+    /// `right_turns`-times from its position, fits onto the board in the form of `new_piece`.
+    /// It should return `None` otherwise.
+    ///
+    /// In particular, rotating a piece `0` times tests whether piece fits in its *current* position.
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>;
+
+    /// This rotates the piece as if it were in free space ('completely freely').
+    /// This should correspond to [`PieceRotator::rotate`] if the first kick never fails.
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece;
+}
+
+/// Standard piece rotator implementations.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum RotationSystem {
+pub enum StdPceRot {
     /// The 'Ocular' rotation system.
     #[default]
     Ocular,
-    /// The raw rotation system resulting from simply reorienting the internal piece representation.
-    /// This can be seen as a debug implementation.
-    /// The rotation itself looks similar to [`RotationSystem::ClassicL`].
-    Debug,
     /// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
     ClassicL,
     /// The right-handed variant of the classic, kick-less rotation system, e.g. used in the NES version.
@@ -23,48 +35,50 @@ pub enum RotationSystem {
     Super,
 }
 
-impl RotationSystem {
-    /// Tries to rotate a piece with the chosen `RotationSystem`.
-    ///
-    /// This will return `Ok(new_piece)` if the `old_piece`, when rotated
-    /// `right_turns`-times from its position, fit onto the board, ending up as `new_piece`;
-    /// It will return None if not.
-    ///
-    /// In particular, rotating a piece `0` times tests whether piece fits in its *current* position.
-    pub fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+impl PieceRotator for StdPceRot {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
         match self {
-            RotationSystem::Debug => debug_rotate(piece, Some(board), right_turns),
-            RotationSystem::Ocular => ocular_rotate(piece, Some(board), right_turns),
-            RotationSystem::ClassicL => classic_rotate(piece, Some(board), right_turns, false),
-            RotationSystem::ClassicR => classic_rotate(piece, Some(board), right_turns, true),
-            RotationSystem::Super => super_rotate(piece, Some(board), right_turns),
+            StdPceRot::Ocular => OcularRotation.rotate(piece, board, right_turns),
+            StdPceRot::ClassicL => ClassicLRotation.rotate(piece, board, right_turns),
+            StdPceRot::ClassicR => ClassicRRotation.rotate(piece, board, right_turns),
+            StdPceRot::Super => SuperRotation.rotate(piece, board, right_turns),
         }
     }
 
-    /// This rotates the piece as if it were in free space ('completely freely').
-    /// This should correspond to [`RotationSystem::rotate`] if the first kick never fails.
-    pub fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
         match self {
-            RotationSystem::Debug => debug_rotate(piece, None, right_turns),
-            RotationSystem::Ocular => ocular_rotate(piece, None, right_turns),
-            RotationSystem::ClassicL => classic_rotate(piece, None, right_turns, false),
-            RotationSystem::ClassicR => classic_rotate(piece, None, right_turns, true),
-            RotationSystem::Super => super_rotate(piece, None, right_turns),
+            StdPceRot::Ocular => ocular_rotate(piece, None, right_turns),
+            StdPceRot::ClassicL => classic_rotate(piece, None, right_turns, true),
+            StdPceRot::ClassicR => classic_rotate(piece, None, right_turns, false),
+            StdPceRot::Super => super_rotate(piece, None, right_turns),
         }
         .unwrap()
     }
 }
 
-fn debug_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option<Piece> {
-    let piece = Piece {
-        tetromino: piece.tetromino,
-        orientation: piece.orientation.turn_right(right_turns),
-        position: piece.position,
-    };
-    if let Some(board) = board {
-        piece.fits_on(board).then_some(piece)
-    } else {
-        Some(piece)
+/// The left-handed variant of the classic, kick-less rotation system, e.g. used in the Gameboy version.
+pub struct ClassicLRotation;
+
+impl PieceRotator for ClassicLRotation {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+        classic_rotate(piece, Some(board), right_turns, true)
+    }
+
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+        classic_rotate(piece, None, right_turns, true).unwrap()
+    }
+}
+
+/// The right-handed variant of the classic, kick-less rotation system, e.g. used in the NES version.
+pub struct ClassicRRotation;
+
+impl PieceRotator for ClassicRRotation {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+        classic_rotate(piece, Some(board), right_turns, false)
+    }
+
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+        classic_rotate(piece, None, right_turns, false).unwrap()
     }
 }
 
@@ -72,11 +86,11 @@ fn classic_rotate(
     piece: &Piece,
     board: Option<&Board>,
     right_turns: i8,
-    is_r_not_l: bool,
+    is_l_not_r: bool,
 ) -> Option<Piece> {
     use Orientation::*;
 
-    let r_variant_offset = if is_r_not_l { 1 } else { 0 };
+    let variant_offset = if is_l_not_r { 0 } else { 1 };
 
     #[rustfmt::skip]
     let kick = match right_turns.rem_euclid(4) {
@@ -93,12 +107,12 @@ fn classic_rotate(
         rot => match piece.tetromino {
             Tetromino::O => (0, 0), // ⠶
             Tetromino::I => match piece.orientation {
-                N | S => (1+r_variant_offset, -1), // ⠤⠤ -> ⡇
-                E | W => (-1-r_variant_offset, 1), // ⡇  -> ⠤⠤
+                N | S => (1+variant_offset, -1), // ⠤⠤ -> ⡇
+                E | W => (-1-variant_offset, 1), // ⡇  -> ⠤⠤
             },
             Tetromino::S | Tetromino::Z => match piece.orientation {
-                N | S => (r_variant_offset, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
-                E | W => (-r_variant_offset, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
+                N | S => (variant_offset, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
+                E | W => (-variant_offset, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
             },
             Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
                 N => if rot == 3 { ( 0,-1) } else { ( 1,-1) }, // ⠺  <- ⠴⠄ -> ⠗  // ⠹  <- ⠤⠆ -> ⠧  // ⠼  <- ⠦⠄ -> ⠏
@@ -119,6 +133,19 @@ fn classic_rotate(
             orientation: piece.orientation.turn_right(right_turns),
             position: piece.position.add(kick),
         })
+    }
+}
+
+/// The Super Rotation System.
+pub struct SuperRotation;
+
+impl PieceRotator for SuperRotation {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+        super_rotate(piece, Some(board), right_turns)
+    }
+
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+        super_rotate(piece, None, right_turns).unwrap()
     }
 }
 
@@ -178,6 +205,19 @@ fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option
             orientation: piece.orientation.turn_right(right_turns),
             position: piece.position.add(kicks[0]),
         })
+    }
+}
+
+/// The 'Ocular' rotation system.
+pub struct OcularRotation;
+
+impl PieceRotator for OcularRotation {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+        ocular_rotate(piece, Some(board), right_turns)
+    }
+
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+        ocular_rotate(piece, None, right_turns).unwrap()
     }
 }
 

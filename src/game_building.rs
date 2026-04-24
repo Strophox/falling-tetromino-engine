@@ -23,10 +23,10 @@ use super::*;
 /// The `GameBuilder` is not used up and its configuration can be re-used to initialize more [`Game`]s.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameBuilder<TetGen = StdTetGen> {
+pub struct GameBuilder<TetGen = StdTetGen, PceRot = StdPceRot> {
     seed: Option<u64>,
     tetromino_generator: Option<TetGen>,
-    config: Configuration,
+    config: Configuration<PceRot>,
 }
 
 impl<TetGen> Default for GameBuilder<TetGen> {
@@ -103,11 +103,11 @@ impl<TetGen: TetrominoGenerator + Clone> GameBuilder<TetGen> {
 }
 
 // Getting a `GameBuilder` blueprint back from an existing `Game`.
-impl<TetGen: Clone> Game<TetGen> {
+impl<TetGen: Clone, PceRot: Clone> Game<TetGen, PceRot> {
     /// Creates a blueprint [`GameBuilder`] and an iterator over current modifier identifiers ([`&str`]s) from which the exact game can potentially be rebuilt.
     ///
     /// Note that the `&str`s serve the *client* to identify the modifiers and reapply them onto the `GameBuilder`, as the base engine does not know how to do so.
-    pub fn blueprint(&self) -> (GameBuilder<TetGen>, Vec<(String, String)>) {
+    pub fn blueprint(&self) -> (GameBuilder<TetGen, PceRot>, Vec<(String, String)>) {
         let builder = GameBuilder {
             seed: Some(self.state_init.seed),
             tetromino_generator: Some(self.state_init.tetromino_generator.clone()),
@@ -121,7 +121,7 @@ impl<TetGen: Clone> Game<TetGen> {
 }
 
 // Gamebuilder: Setter methods.
-impl<TetGen> GameBuilder<TetGen> {
+impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
     /// The value to seed the game's PRNG with.
     pub fn seed(&mut self, x: u64) -> &mut Self {
         self.seed = Some(x);
@@ -135,7 +135,7 @@ impl<TetGen> GameBuilder<TetGen> {
     }
 
     /// Sets the [`Configuration`] that will be used by [`Game`].
-    pub fn config(&mut self, x: Configuration) -> &mut Self {
+    pub fn config(&mut self, x: Configuration<PceRot>) -> &mut Self {
         self.config = x;
         self
     }
@@ -152,7 +152,7 @@ impl<TetGen> GameBuilder<TetGen> {
         self
     }
     /// The method of tetromino rotation used.
-    pub fn rotation_system(&mut self, x: RotationSystem) -> &mut Self {
+    pub fn rotation_system(&mut self, x: PceRot) -> &mut Self {
         self.config.rotation_system = x;
         self
     }

@@ -9,7 +9,7 @@ use crate::{
 
 use super::*;
 
-impl<TetGen: TetrominoGenerator> Game<TetGen> {
+impl<TetGen: TetrominoGenerator, PceRot: PieceRotator> Game<TetGen, PceRot> {
     /// Retrieve the when the next *autonomous* in-game update is scheduled.
     /// I.e., compute the next time the game would change state assuming no button updates
     ///
@@ -330,8 +330,8 @@ impl<TetGen: TetrominoGenerator> Game<TetGen> {
     }
 }
 
-fn do_spawn<TetGen: TetrominoGenerator>(
-    config: &Configuration,
+fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     spawn_time: InGameTime,
 ) -> Phase {
@@ -488,8 +488,8 @@ fn do_spawn<TetGen: TetrominoGenerator>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_player_input<TetGen>(
-    config: &Configuration,
+fn do_player_input<TetGen, PceRot: PieceRotator>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
@@ -912,8 +912,8 @@ fn try_do_hold<TetGen>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_autonomous_shift<TetGen>(
-    config: &Configuration,
+fn do_autonomous_shift<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     previous_piece: Piece,
     autoshift_time: InGameTime,
@@ -1000,8 +1000,8 @@ fn do_autonomous_shift<TetGen>(
     }
 }
 
-fn do_fall<TetGen>(
-    config: &Configuration,
+fn do_fall<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
@@ -1120,8 +1120,8 @@ fn do_fall<TetGen>(
     }
 }
 
-fn do_lock<TetGen>(
-    config: &Configuration,
+fn do_lock<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     piece: Piece,
     lock_time: InGameTime,
@@ -1237,8 +1237,8 @@ fn do_lock<TetGen>(
     }
 }
 
-fn do_lines_clearing<TetGen>(
-    config: &Configuration,
+fn do_lines_clearing<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
     clear_finish_time: InGameTime,
 ) -> Phase {
@@ -1377,8 +1377,8 @@ fn calc_isleftshift_activesince_isteleport(
     }
 }
 
-fn calc_next_autoshift_time<TetGen>(
-    config: &Configuration,
+fn calc_next_autoshift_time<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
     state: &State<TetGen>,
     current_time: InGameTime,
     dir_active_since: InGameTime,
@@ -1408,9 +1408,9 @@ fn calc_next_autoshift_time<TetGen>(
     current_time.saturating_add(shift_delay)
 }
 
-fn calc_next_fall_time<TetGen>(
+fn calc_next_fall_time<TetGen, PceRot>(
     state: &State<TetGen>,
-    config: &Configuration,
+    config: &Configuration<PceRot>,
     current_time: InGameTime,
     active_buttons: &ButtonsState,
 ) -> InGameTime {

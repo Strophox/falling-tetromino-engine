@@ -125,7 +125,7 @@ use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
 pub use game_building::GameBuilder;
 pub use game_modding::{GameAccess, GameModifier};
 pub use helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
-pub use piece_rotation::RotationSystem;
+pub use piece_rotation::{PieceRotator, StdPceRot};
 pub use tetromino_generation::{StdTetGen, TetrominoGenerator};
 
 /// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
@@ -159,7 +159,7 @@ pub type GameRng = ChaCha8Rng;
 pub type NotificationFeed = Vec<(Notification, InGameTime)>;
 
 /// Standard export of the more generic [`game_core::Configuration`] type.
-pub type Configuration = game_core::Configuration;
+pub type Configuration = game_core::Configuration<StdPceRot>;
 /// Standard export of the more generic [`game_core::StateInitialization`] type.
 pub type StateInitialization = game_core::StateInitialization<StdTetGen>;
 /// Standard export of the more generic [`game_core::State`] type.

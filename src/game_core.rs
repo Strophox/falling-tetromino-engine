@@ -14,7 +14,7 @@ use super::*;
 /// or supply the information manually / externally.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Configuration {
+pub struct Configuration<PceRot> {
     /// How many pieces should be pre-generated and accessible/visible in the game state.
     #[cfg_attr(feature = "serde", serde(rename = "preview"))]
     pub generate_piece_preview: usize,
@@ -26,7 +26,7 @@ pub struct Configuration {
 
     /// The method of tetromino rotation used.
     #[cfg_attr(feature = "serde", serde(rename = "rotsys"))]
-    pub rotation_system: RotationSystem,
+    pub rotation_system: PceRot,
 
     /// How long the game should take to spawn a new piece.
     #[cfg_attr(feature = "serde", serde(rename = "are"))]
@@ -199,14 +199,14 @@ pub enum Phase {
 
 /// Main game struct representing a round of play.
 #[derive(Debug)]
-pub struct Game<TetGen = StdTetGen> {
+pub struct Game<TetGen = StdTetGen, PceRot = StdPceRot> {
     /// Some internal configuration options of the `Game`.
     ///
     /// # Reproducibility
     /// The game does not detect changes to its configuration.
     /// It is therefore the user's responsibility to either not change configuration after the game has started,
     /// or supply the information manually / externally.
-    pub config: Configuration,
+    pub config: Configuration<PceRot>,
 
     pub(crate) state_init: StateInitialization<TetGen>,
 
@@ -220,15 +220,15 @@ pub struct Game<TetGen = StdTetGen> {
     /// The game does not detect changes to its modifiers.
     /// It is therefore the user's responsibility to either not change modifiers after the game has started,
     /// or supply the information manually / externally.
-    pub modifiers: Vec<Box<dyn GameModifier<TetGen>>>,
+    pub modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot>>>,
 }
 
-impl Default for Configuration {
+impl<PceRot: Default> Default for Configuration<PceRot> {
     fn default() -> Self {
         Self {
             generate_piece_preview: 4,
             allow_spawn_manipulation: true,
-            rotation_system: RotationSystem::default(),
+            rotation_system: PceRot::default(),
             spawn_delay: Duration::from_millis(50),
             delayed_auto_shift: Duration::from_millis(167),
             auto_repeat_rate: Duration::from_millis(33),
@@ -266,7 +266,7 @@ impl Phase {
     }
 }
 
-impl<TetGen> Game<TetGen> {
+impl<TetGen, PceRot> Game<TetGen, PceRot> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
     pub fn builder() -> GameBuilder<TetGen> {
         GameBuilder::default()
@@ -303,7 +303,7 @@ impl<TetGen> Game<TetGen> {
     }
 }
 
-impl<TetGen: Clone> Game<TetGen> {
+impl<TetGen: Clone, PceRot: Clone> Game<TetGen, PceRot> {
     /// Try to create a cloned instance of the game.
     pub fn try_clone(&self) -> Result<Self, String> {
         let mut modifiers = Vec::new();

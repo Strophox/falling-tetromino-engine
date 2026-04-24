@@ -15,16 +15,11 @@ use crate::{ExtNonNegF64, GameRng, Tetromino};
 ///
 /// To actually generate [`Tetromino`]s, the [`TetrominoGenerator::using_rng`] method needs to be used to yield something that is an [`Iterator`].
 pub trait TetrominoGenerator {
-    /// The type returned by [`TetrominoGenerator::using_rng`].
-    type UsingRng<'a>: Iterator<Item = Tetromino> + 'a
-    where
-        Self: 'a;
-
     /// Method to construct and initialize the `TetrominoGenerator`.
     fn from_rng(rng: &mut GameRng) -> Self;
 
     /// Method that allows `TetrominoGenerator` to be used as [`Iterator`].
-    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> Self::UsingRng<'a>;
+    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a;
 }
 
 /// Standard tetromino generator implementations.
@@ -138,21 +133,19 @@ impl StdTetGen {
 /// Struct produced from [`TetrominoGenerator::using_rng`] which implements [`Iterator`].
 pub struct StdUsingRng<'a> {
     /// Selected tetromino generator to use as information source.
-    pub tetromino_generator: &'a mut StdTetGen,
+    pub std_tet_gen: &'a mut StdTetGen,
     /// Thread random number generator for raw soure of randomness.
     pub rng: &'a mut GameRng,
 }
 
 impl TetrominoGenerator for StdTetGen {
-    type UsingRng<'a> = StdUsingRng<'a>;
-
     fn from_rng(_rng: &mut GameRng) -> Self {
         Self::snappy_recency()
     }
 
-    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> StdUsingRng<'a> {
+    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a {
         StdUsingRng {
-            tetromino_generator: self,
+            std_tet_gen: self,
             rng,
         }
     }
@@ -162,7 +155,7 @@ impl<'a> Iterator for StdUsingRng<'a> {
     type Item = Tetromino;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.tetromino_generator {
+        match &mut self.std_tet_gen {
             StdTetGen::Classic {
                 tet_last_emitted,
                 aversion_to_last,

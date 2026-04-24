@@ -9,8 +9,8 @@ use super::*;
 /// Helper struct to enable [`GameModifier`]s to access to the game's internals.
 #[derive(PartialEq, Eq, Debug)]
 #[allow(unused, missing_docs)]
-pub struct GameAccess<'a, TetGen> {
-    pub config: &'a mut Configuration,
+pub struct GameAccess<'a, TetGen, PceRot> {
+    pub config: &'a mut Configuration<PceRot>,
     pub state_init: &'a StateInitialization<TetGen>,
     pub state: &'a mut State<TetGen>,
     pub phase: &'a mut Phase,
@@ -39,7 +39,7 @@ pub(crate) enum Hook<'a> {
     LinesClearPost,
 }
 
-impl<TetGen> Game<TetGen> {
+impl<TetGen, PceRot> Game<TetGen, PceRot> {
     pub(crate) fn run_mods(&mut self, mut hook_point: Hook, feed: &mut NotificationFeed) {
         if self.config.notification_level == NotificationLevel::Debug {
             feed.push((
@@ -110,7 +110,7 @@ impl<TetGen> Game<TetGen> {
 ///     (e.g. the tetromino type is converted to `Tetromino::I` after 1s of `Piece` spawn.)
 ///   - **Not** O.k.: Keep track of the frontend's approximate framerate (by counting number of time update calls)
 ///     and turn the active piece into `Tetromino::O` for certain values.
-pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
+pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug {
     /// Convention to identify a mod by name.
     fn id(&self) -> String;
 
@@ -145,14 +145,14 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
 
     /// Try to clone the modifier if possible.
     /// Otherwise return an error.
-    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen>>, String>;
+    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen, PceRot>>, String>;
 
     /// This function gets called anytime [`Game::update`] is called with `Some` actual [`Input`].
     ///
     /// Note that the `&mut Option<Input>` allows this call to [`Option::take`] the input and nullify it.
     fn on_receive_player_input(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
         _player_input: &mut Option<Input>,
@@ -160,15 +160,15 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     }
 
     /// This function gets called once, when the game has finished getting constructed by `GameBuilder`.
-    fn on_game_built(&mut self, _game: GameAccess<TetGen>) {}
+    fn on_game_built(&mut self, _game: GameAccess<TetGen, PceRot>) {}
 
     /// This function gets called once, when the game has entered [`Phase::GameEnd`].
-    fn on_game_end(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_game_end(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
 
     /// This function gets called anytime and immediately before any step inside the engine is applied which will update the game state in a way where time is moved forward.
     fn on_progress_time_state_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
@@ -176,7 +176,7 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called anytime and immediately after any step inside the engine is applied which will update the game state in a way where time has been moved forward.
     fn on_progress_time_state_post(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
     ) {
     }
@@ -184,7 +184,7 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called immediately bfore the engine checks all its limiting stats and possibly ends.
     fn on_check_game_limits_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
     ) {
     }
@@ -192,7 +192,7 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called immediately after the engine has checked all its limiting stats and possibly ended.
     fn on_check_game_limits_post(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
     ) {
     }
@@ -200,18 +200,18 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called immediately before [`Phase::Spawning`] is handled.
     fn on_spawn_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after [`Phase::Spawning`] has been handled.
-    fn on_spawn_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_spawn_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately before a player action in [`Phase::PieceInPlay`] is handled.
     fn on_player_action_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _input: Input,
         _time: &mut InGameTime,
@@ -220,7 +220,7 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called immediately after a player action in [`Phase::PieceInPlay`] has been handled.
     fn on_player_action_post(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _input: Input,
     ) {
@@ -229,44 +229,54 @@ pub trait GameModifier<TetGen = StdTetGen>: std::fmt::Debug {
     /// This function gets called immediately before an autonomous move of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_autoshift_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after an autonomous move of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_autoshift_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_autoshift_post(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot>,
+        _feed: &mut NotificationFeed,
+    ) {
+    }
 
     /// This function gets called immediately before falling of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_fall_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after falling of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_fall_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_fall_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately before locking of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_lock_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after locking of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_lock_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_lock_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
 
     /// This function gets called immediately before [`Phase::ClearingLines`] is handled.
     fn on_lines_clear_pre(
         &mut self,
-        _game: GameAccess<TetGen>,
+        _game: GameAccess<TetGen, PceRot>,
         _feed: &mut NotificationFeed,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after [`Phase::ClearingLines`] has been handled.
-    fn on_lines_clear_post(&mut self, _game: GameAccess<TetGen>, _feed: &mut NotificationFeed) {}
+    fn on_lines_clear_post(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot>,
+        _feed: &mut NotificationFeed,
+    ) {
+    }
 }

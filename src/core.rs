@@ -2,6 +2,7 @@
 
 use super::*;
 
+use either::Either;
 use rand_chacha::ChaCha8Rng;
 
 use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
@@ -863,9 +864,11 @@ pub struct Configuration<PceRot = StdPceRot> {
     #[cfg_attr(feature = "serde", serde(rename = "fallparams"))]
     pub fall_delay_params: DelayParameters,
 
-    /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
+    /// How soft drop should speed up the falling of a piece should speed up while [`Button::SoftDrop`] is held.
+    /// - One variant describes a *factor*: How many times faster than the current gravity falling should be.
+    /// - The other variant describes an *upper bound*: The fall delay that should be used, if it is shorter than current gravity. Otherwise no change.
     #[cfg_attr(feature = "serde", serde(rename = "sdf"))]
-    pub soft_drop_factor: ExtNonNegF64,
+    pub soft_drop_speedup: Either<ExtNonNegF64, ExtDuration>,
 
     /// Specification of how fall delay gets calculated from the rest of the state.
     #[cfg_attr(feature = "serde", serde(rename = "lockparams"))]
@@ -1051,7 +1054,7 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
             delayed_auto_shift: Duration::from_millis(167),
             auto_repeat_rate: Duration::from_millis(33),
             fall_delay_params: DelayParameters::constant(Duration::from_millis(1000).into()),
-            soft_drop_factor: ExtNonNegF64::new(15.0).unwrap(),
+            soft_drop_speedup: Either::Right(Duration::from_millis(33).into()),
             lock_delay_params: DelayParameters::constant(Duration::from_millis(500).into()),
             allow_lenient_lock_reset: false,
             ensure_shift_delay_lt_lock_delay: false,

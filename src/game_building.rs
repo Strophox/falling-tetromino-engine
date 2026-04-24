@@ -2,8 +2,9 @@
 Customizing, templating and constructing [`Game`]s.
  */
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
+use either::Either;
 use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 
@@ -163,18 +164,18 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// How long the game should take to spawn a new piece.
-    pub fn spawn_delay(&mut self, x: InGameTime) -> &mut Self {
+    pub fn spawn_delay(&mut self, x: Duration) -> &mut Self {
         self.config.spawn_delay = x;
         self
     }
     /// How long it takes for the active piece to start automatically shifting more to the side
     /// after the initial time a 'move' button has been pressed.
-    pub fn delayed_auto_shift(&mut self, x: InGameTime) -> &mut Self {
+    pub fn delayed_auto_shift(&mut self, x: Duration) -> &mut Self {
         self.config.delayed_auto_shift = x;
         self
     }
     /// How long it takes for automatic side movement to repeat once it has started.
-    pub fn auto_repeat_rate(&mut self, x: InGameTime) -> &mut Self {
+    pub fn auto_repeat_rate(&mut self, x: Duration) -> &mut Self {
         self.config.auto_repeat_rate = x;
         self
     }
@@ -183,9 +184,11 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self.config.fall_delay_params = x;
         self
     }
-    /// How many times faster than normal drop speed a piece should fall while 'soft drop' is being held.
-    pub fn soft_drop_factor(&mut self, x: ExtNonNegF64) -> &mut Self {
-        self.config.soft_drop_factor = x;
+    /// How soft drop should speed up the falling of a piece should speed up while [`Button::SoftDrop`] is held.
+    /// - One variant describes how many times faster than the current gravity falling should be.
+    /// - The other variant describes the fall delay that should be used, if it is faster than current gravity. Otherwise no change.
+    pub fn soft_drop_speedup(&mut self, x: Either<ExtNonNegF64, ExtDuration>) -> &mut Self {
+        self.config.soft_drop_speedup = x;
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.

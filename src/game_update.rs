@@ -2,6 +2,8 @@
 Handles what happens when [`Game::update`] is called.
 */
 
+use either::Either;
+
 use crate::{
     core::{Configuration, Game, Phase, State},
     game_modding::Hook,
@@ -1417,7 +1419,10 @@ fn calc_next_fall_time<TetGen, PceRot>(
     let fall_delay = if active_buttons[Button::TeleDown].is_some() {
         ExtDuration::ZERO
     } else if active_buttons[Button::DropSoft].is_some() {
-        state.fall_delay.div_ennf64(config.soft_drop_factor)
+        match config.soft_drop_speedup {
+            Either::Left(factor) => state.fall_delay.div_ennf64(factor),
+            Either::Right(upperbound) => state.fall_delay.min(upperbound),
+        }
     } else {
         state.fall_delay
     };

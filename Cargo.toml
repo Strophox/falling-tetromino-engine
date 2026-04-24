@@ -29,6 +29,7 @@ rand_chacha = { version = "0.10.0", features = ["serde"] }
 rand = "0.10.0"
 
 serde = { version = "1.0", features = ["derive"], optional = true }
+either = "1.15.0"
 
 [dev-dependencies]
 crossterm = "0.29.0"

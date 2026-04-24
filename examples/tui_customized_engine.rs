@@ -15,10 +15,53 @@ use falling_tetromino_engine::{
 };
 use rand::RngExt;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // NOTE: Here we re-define the *core* Game type using our own generator and rotators.
-    type Game = falling_tetromino_engine::core::Game<UniformGenerator, LazyRotator>;
+// NOTE: Here we manually re-define the *core* Game type using our own custom generation and rotation types.
+type Game = falling_tetromino_engine::core::Game<UniformGenerator, LazyRotator>;
 
+// Our custom tetromino generator.
+// It is very simple: It just picks tetrominos completely randomly*.
+//
+// (*This means it doesn't need to remember any history or other data: It is memoryless.)
+#[derive(Clone)]
+struct UniformGenerator;
+
+impl TetrominoGenerator for UniformGenerator {
+    fn from_rng(_rng: &mut GameRng) -> Self {
+        // We don't need rng to randomize the initial state of this generator, since it has no state.
+        UniformGenerator
+    }
+
+    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a {
+        std::iter::from_fn(|| {
+            let tet = Tetromino::VARIANTS[rng.random_range(0..7)];
+            Some(tet)
+        })
+    }
+}
+
+// Our custom rotation system.
+// It is very simple: It doesn't actually do any kicks when changing orientation*.
+//
+// (*Instead, it just relies on how the engine outputs raw piece offset data,
+// which is always aligned to bottom left coordinate of a piece.
+// For example, 'I' will always pivot around it lower left unit. Try it out!)
+struct LazyRotator;
+
+impl PieceRotator for LazyRotator {
+    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+        let rotated_piece = self.free_rotate(piece, right_turns);
+        rotated_piece.fits_on(board).then_some(rotated_piece)
+    }
+
+    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
+        Piece {
+            orientation: piece.orientation.turn_right(right_turns),
+            ..*piece
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize game. In-game time starts at 0s.
     let mut game = Game::builder()
         .seed(1234)
@@ -107,47 +150,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => println!(" ~ Stopped"),
     }
     Ok(())
-}
-
-// Our custom rotation system.
-// It is very simple: It doesn't actually do any kicks when changing orientation*.
-//
-// (*Instead, it just relies on how the engine outputs raw piece offset data,
-// which is always aligned to bottom left coordinate of a piece.
-// For example, 'I' will always pivot around it lower left unit. Try it out!)
-struct LazyRotator;
-
-impl PieceRotator for LazyRotator {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
-        let rotated_piece = self.free_rotate(piece, right_turns);
-        rotated_piece.fits_on(board).then_some(rotated_piece)
-    }
-
-    fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
-        Piece {
-            orientation: piece.orientation.turn_right(right_turns),
-            ..*piece
-        }
-    }
-}
-
-// Our custom tetromino generator.
-// It is very simple: It just picks tetrominos completely randomly*.
-//
-// (*This means it doesn't need to remember any history or other data: It is memoryless.)
-#[derive(Clone)]
-struct UniformGenerator;
-
-impl TetrominoGenerator for UniformGenerator {
-    fn from_rng(_rng: &mut GameRng) -> Self {
-        // We don't need rng to randomize the initial state of this generator, since it has no state.
-        UniformGenerator
-    }
-
-    fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a {
-        std::iter::from_fn(|| {
-            let tet = Tetromino::VARIANTS[rng.random_range(0..7)];
-            Some(tet)
-        })
-    }
 }

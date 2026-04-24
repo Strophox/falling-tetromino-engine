@@ -5,7 +5,7 @@ Handles what happens when [`Game::update`] is called.
 use either::Either;
 
 use crate::{
-    core::{Configuration, Game, Phase, State},
+    core::{Configuration, ExtEitherParamsTable, Game, Phase, State},
     game_modding::Hook,
 };
 
@@ -1259,18 +1259,41 @@ fn do_lines_clearing<TetGen, PceRot>(
                 .is_multiple_of(config.update_delays_every_n_lineclears)
             {
                 // Calculate new fall- and lock delay for game state.
-                (state.fall_delay, state.lock_delay) = calc_fall_and_lock_delay(
-                    &config.fall_delay_params,
-                    &config.lock_delay_params,
-                    state.fall_delay_lowerbound_hit_at_n_lineclears,
-                    state.lineclears,
-                );
+                if let Some(hit_at_n_lineclears) = state.fall_delay_lowerbound_hit_at_n_lineclears {
+                    // Fall delay zero was hit at some point, only possibly decrease lock delay now.
 
-                // Remember the first time fall delay hit zero.
-                if state.fall_delay == config.fall_delay_params.lowerbound()
-                    && state.fall_delay_lowerbound_hit_at_n_lineclears.is_none()
-                {
-                    state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
+                    if let Some(lock_delay_curve) = &config.lock_delay_curve {
+                        // Actually compute new delay from equation.
+                        let relevant_lineclears = state.lineclears - hit_at_n_lineclears;
+                        let (new_lock_delay, _lock_lowerbound_hit) = lock_delay_curve
+                            .retrieve_and_check(
+                                relevant_lineclears,
+                                config.update_delays_every_n_lineclears,
+                            );
+
+                        state.lock_delay = new_lock_delay;
+                    }
+                } else {
+                    // Decrease fall delay as normal.
+
+                    // Actually compute new delay from equation.
+                    let (new_fall_delay, fall_lowerbound_hit) =
+                        config.fall_delay_curve.retrieve_and_check(
+                            state.lineclears,
+                            config.update_delays_every_n_lineclears,
+                        );
+
+                    // Remember the first time fall delay hit zero.
+                    if fall_lowerbound_hit {
+                        state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
+                    }
+
+                    state.fall_delay = new_fall_delay;
+
+                    // If lock delay does not have its own curve, it is equal to the fall delay.
+                    if config.lock_delay_curve.is_none() {
+                        state.lock_delay = state.fall_delay;
+                    }
                 }
             }
         }
@@ -1428,28 +1451,4 @@ fn calc_next_fall_time<TetGen, PceRot>(
     };
 
     current_time.saturating_add(fall_delay.saturating_duration())
-}
-
-// Compute the fall and lock delay corresponding to the current lineclear progress.
-fn calc_fall_and_lock_delay(
-    fall_delay_params: &DelayParameters,
-    lock_delay_params: &DelayParameters,
-    fall_delay_lowerbound_hit_at_n_lineclears: Option<u32>,
-    lineclears: u32,
-) -> (ExtDuration, ExtDuration) {
-    if let Some(hit_at_n_lineclears) = fall_delay_lowerbound_hit_at_n_lineclears {
-        // Fall delay zero was hit at some point, only possibly decrease lock delay now.
-
-        // Actually compute new delay from equation.
-        let lock_delay = lock_delay_params.calculate(lineclears - hit_at_n_lineclears);
-
-        (fall_delay_params.lowerbound(), lock_delay)
-    } else {
-        // Normally decrease fall delay.
-
-        // Actually compute new delay from equation.
-        let fall_delay = fall_delay_params.calculate(lineclears);
-
-        (fall_delay, lock_delay_params.base_delay())
-    }
 }

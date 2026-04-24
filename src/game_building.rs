@@ -9,7 +9,9 @@ use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
-    core::{Configuration, Game, Phase, State, StateInitialization},
+    core::{
+        Configuration, DelayTable, ExtEitherParamsTable, Game, Phase, State, StateInitialization,
+    },
     game_modding::Hook,
     tetromino_generation::StdTetGen,
 };
@@ -69,8 +71,16 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
             .unwrap_or_else(|| TetGen::from_rng(&mut rng));
         let config = self.config.clone();
 
-        let fall_delay = config.fall_delay_params.calculate(0);
-        let lock_delay = config.lock_delay_params.calculate(0);
+        let (fall_delay, fall_lowerbound_hit) = config
+            .fall_delay_curve
+            .retrieve_and_check(0, config.update_delays_every_n_lineclears);
+        let lock_delay = if let Some(lock_delay_curve) = &config.lock_delay_curve {
+            lock_delay_curve
+                .retrieve_and_check(0, config.update_delays_every_n_lineclears)
+                .0
+        } else {
+            fall_delay
+        };
 
         let mut game = Game {
             modifiers,
@@ -86,9 +96,7 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
                 piece_held: None,
                 board: Board::default(),
                 fall_delay,
-                fall_delay_lowerbound_hit_at_n_lineclears: fall_delay
-                    .le(&config.fall_delay_params.lowerbound())
-                    .then_some(0),
+                fall_delay_lowerbound_hit_at_n_lineclears: fall_lowerbound_hit.then_some(0),
                 lock_delay,
                 pieces_locked: [0; Tetromino::VARIANTS.len()],
                 lineclears: 0,
@@ -180,8 +188,8 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn fall_delay_params(&mut self, x: DelayParameters) -> &mut Self {
-        self.config.fall_delay_params = x;
+    pub fn fall_delay_params(&mut self, x: Either<DelayParameters, DelayTable>) -> &mut Self {
+        self.config.fall_delay_curve = x;
         self
     }
     /// How soft drop should speed up the falling of a piece should speed up while [`Button::SoftDrop`] is held.
@@ -192,8 +200,11 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn lock_delay_params(&mut self, x: DelayParameters) -> &mut Self {
-        self.config.lock_delay_params = x;
+    pub fn lock_delay_params(
+        &mut self,
+        x: Option<Either<DelayParameters, DelayTable>>,
+    ) -> &mut Self {
+        self.config.lock_delay_curve = x;
         self
     }
     /// Whether engine should try to ensure that delays for autonomous moves - which are determined by

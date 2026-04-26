@@ -10,7 +10,8 @@ use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
     core::{
-        Configuration, DelayTable, ExtEitherParamsTable, Game, Phase, State, StateInitialization,
+        Configuration, DelayTable, ExtDelayData, Game, Phase, SoftDropSpeedup, State,
+        StateInitialization,
     },
     game_modding::Hook,
     tetromino_generation::StdTetGen,
@@ -188,19 +189,19 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn fall_delay_params(&mut self, x: Either<DelayParameters, DelayTable>) -> &mut Self {
+    pub fn fall_delay_curve(&mut self, x: Either<DelayParameters, DelayTable>) -> &mut Self {
         self.config.fall_delay_curve = x;
         self
     }
     /// How soft drop should speed up the falling of a piece should speed up while [`Button::DropSoft`] is held.
     /// - One variant describes how many times faster than the current gravity falling should be.
     /// - The other variant describes the fall delay that should be used, if it is faster than current gravity. Otherwise no change.
-    pub fn soft_drop_speedup(&mut self, x: Either<ExtNonNegF64, ExtDuration>) -> &mut Self {
+    pub fn soft_drop_speedup(&mut self, x: SoftDropSpeedup) -> &mut Self {
         self.config.soft_drop_speedup = x;
         self
     }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn lock_delay_params(
+    pub fn lock_delay_curve(
         &mut self,
         x: Option<Either<DelayParameters, DelayTable>>,
     ) -> &mut Self {

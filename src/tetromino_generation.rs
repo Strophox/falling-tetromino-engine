@@ -82,7 +82,7 @@ impl StdTetGen {
     }
 
     /// Initialize a default instance of the [`StdTetGen::Recency`] variant.
-    pub const fn snappy_recency() -> Self {
+    pub const fn snappy() -> Self {
         // SAFETY: `+0.0 <= 2.5`.
         let factor = unsafe { ExtNonNegF64::new_unchecked(2.5) };
         Self::Recency(RecencyGen {
@@ -90,6 +90,12 @@ impl StdTetGen {
             factor,
             is_base_not_exp: false,
         })
+    }
+}
+
+impl Default for StdTetGen {
+    fn default() -> Self {
+        StdTetGen::snappy()
     }
 }
 
@@ -103,7 +109,7 @@ pub struct StdUsingRng<'a> {
 
 impl TetrominoGenerator for StdTetGen {
     fn from_rng(_rng: &mut GameRng) -> Self {
-        Self::snappy_recency()
+        Self::snappy()
     }
 
     fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a {
@@ -133,11 +139,11 @@ impl<'a> Iterator for StdUsingRng<'a> {
 pub struct RerollGen {
     /// The tetromino that was last generated.
     #[cfg_attr(feature = "serde", serde(rename = "lasttet"))]
-    tet_last_emitted: Option<Tetromino>,
+    pub tet_last_emitted: Option<Tetromino>,
 
     /// How many times we may reroll to get a different piece until we give up.
     #[cfg_attr(feature = "serde", serde(rename = "aversion"))]
-    aversion_to_last: u32,
+    pub aversion_to_last: u32,
 }
 
 impl TetrominoGenerator for RerollGen {
@@ -182,11 +188,11 @@ impl TetrominoGenerator for RerollGen {
 pub struct StockGen {
     /// The number of each  piece type left in the bag.
     #[cfg_attr(feature = "serde", serde(rename = "stocked"))]
-    tets_stocked: [u32; Tetromino::VARIANTS.len()],
+    pub tets_stocked: [u32; Tetromino::VARIANTS.len()],
 
     /// How many of each piece type to refill with.
     #[cfg_attr(feature = "serde", serde(rename = "bagsize"))]
-    restock_multiplicity: NonZeroU32,
+    pub restock_multiplicity: NonZeroU32,
 }
 
 impl TetrominoGenerator for StockGen {
@@ -238,7 +244,7 @@ pub struct BalanceOutGen {
     /// Note that this gets normalized, i.e. all entries are decremented together until
     /// one is `0` and we only get the offset between the lowest count and the others.
     #[cfg_attr(feature = "serde", serde(rename = "tallies"))]
-    tets_relative_tallies: [u32; Tetromino::VARIANTS.len()],
+    pub tets_relative_tallies: [u32; Tetromino::VARIANTS.len()],
 }
 
 impl TetrominoGenerator for BalanceOutGen {
@@ -293,15 +299,15 @@ pub struct RecencyGen {
     ///
     /// `0` here denotes that it was the most recent piece generated.
     #[cfg_attr(feature = "serde", serde(rename = "lasttets"))]
-    tets_last_emitted: [u32; Tetromino::VARIANTS.len()],
+    pub tets_last_emitted: [u32; Tetromino::VARIANTS.len()],
 
     /// Determines how strongly it weighs pieces not generated in a while.
     #[cfg_attr(feature = "serde", serde(rename = "factor"))]
-    factor: ExtNonNegF64,
+    pub factor: ExtNonNegF64,
 
     /// Whether factor is used as base or exponent.
     #[cfg_attr(feature = "serde", serde(rename = "is_base"))]
-    is_base_not_exp: bool,
+    pub is_base_not_exp: bool,
 }
 
 impl TetrominoGenerator for RecencyGen {

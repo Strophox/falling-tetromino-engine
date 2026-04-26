@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed internal modules.
 - Renamed `Phase::LinesClearing -> ::ClearingLines`.
 - *(Unreleased changes might not logged at this point, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
+- Added `struct SoftDropSpeedup`.
+- Added `struct DelayTable` and `type DelayData = Either<DelayParams, DelayTable>`.
 
 
 ## [8.2.0] - 2026-04-17

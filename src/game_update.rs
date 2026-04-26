@@ -5,7 +5,7 @@ Handles what happens when [`Game::update`] is called.
 use either::Either;
 
 use crate::{
-    core::{Configuration, ExtEitherParamsTable, Game, Phase, State},
+    core::{Configuration, ExtDelayData, Game, Phase, State},
     game_modding::Hook,
 };
 
@@ -833,7 +833,14 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             || matches!(input, I::Activate(B::DropSoft) | I::Deactivate(B::DropSoft));
         if fall_reset {
             // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.}
-            calc_next_fall_time(state, config, input_time, updated_active_buttons)
+            let use_delayed_soft_drop = matches!(input, I::Activate(B::DropSoft));
+            calc_next_fall_time(
+                state,
+                config,
+                input_time,
+                updated_active_buttons,
+                use_delayed_soft_drop,
+            )
         } else {
             // Falling as before.
             previous_fall_or_lock_time
@@ -972,7 +979,7 @@ fn do_autonomous_shift<TetGen, PceRot>(
 
         if was_grounded {
             // Refresh fall timer if we *started* falling.
-            calc_next_fall_time(state, config, autoshift_time, &state.active_buttons)
+            calc_next_fall_time(state, config, autoshift_time, &state.active_buttons, false)
         } else {
             // Falling as before.
             previous_fall_or_lock_time
@@ -1076,7 +1083,7 @@ fn do_fall<TetGen, PceRot>(
     let updated_is_airborne = updated_piece.is_airborne(&state.board);
 
     let updated_fall_or_lock_time = if updated_is_airborne {
-        calc_next_fall_time(state, config, fall_time, &state.active_buttons)
+        calc_next_fall_time(state, config, fall_time, &state.active_buttons, false)
     } else {
         // NOTE: lock_time_cap may actually lie in the past, so we first need to cap *it* from below (current time)!
         fall_time
@@ -1438,13 +1445,20 @@ fn calc_next_fall_time<TetGen, PceRot>(
     config: &Configuration<PceRot>,
     current_time: InGameTime,
     active_buttons: &ButtonsState,
+    use_delayed_soft_drop: bool,
 ) -> InGameTime {
     let fall_delay = if active_buttons[Button::TeleDown].is_some() {
         ExtDuration::ZERO
     } else if active_buttons[Button::DropSoft].is_some() {
-        match config.soft_drop_speedup {
-            Either::Left(factor) => state.fall_delay.div_ennf64(factor),
-            Either::Right(upperbound) => state.fall_delay.min(upperbound),
+        if use_delayed_soft_drop
+            && let Some(delayed_soft_drop) = config.soft_drop_speedup.delayed_soft_drop
+        {
+            state.fall_delay.min(delayed_soft_drop)
+        } else {
+            match config.soft_drop_speedup.factor_or_upperbound {
+                Either::Left(factor) => state.fall_delay.div_ennf64(factor),
+                Either::Right(upperbound) => state.fall_delay.min(upperbound),
+            }
         }
     } else {
         state.fall_delay

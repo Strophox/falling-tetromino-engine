@@ -119,23 +119,45 @@ pub mod piece_rotation;
 pub mod tetromino_generation;
 
 pub use core::{
-    Board, Button, ButtonsState, CoordAdd, Coordinate, DelayParameters, GameEndCause, GameLimits,
-    GameRng, HEIGHT, InGameTime, Input, LOCK_OUT_HEIGHT, Line, Notification, NotificationFeed,
-    Offset, Orientation, Piece, Stat, Tetromino, TileID, UpdateGameError, WIDTH,
+    Board, Button, ButtonsState, CoordAdd, Coordinate, DelayData, DelayParameters, DelayTable,
+    GameEndCause, GameLimits, GameRng, HEIGHT, InGameTime, Input, LOCK_OUT_HEIGHT, Line,
+    Notification, NotificationFeed, Offset, Orientation, Piece, SoftDropSpeedup, Stat, Tetromino,
+    TileID, UpdateGameError, WIDTH,
 };
 pub use game_building::GameBuilder;
-pub use game_modding::{GameAccess, GameModifier};
+pub use game_modding::GameModifier;
 pub use helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
 pub use piece_rotation::{PieceRotator, StdPceRot};
 pub use tetromino_generation::{StdTetGen, TetrominoGenerator};
 
 /// Standard export of the more generic [`core::Configuration`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Configuration`.
 pub type Configuration = core::Configuration;
 /// Standard export of the more generic [`core::StateInitialization`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::StateInitialization`.
 pub type StateInitialization = core::StateInitialization;
 /// Standard export of the more generic [`core::State`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::State`.
 pub type State = core::State;
 /// Standard export of the more generic [`core::Phase`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Phase`.
 pub type Phase = core::Phase;
 /// Standard export of the more generic [`core::Game`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Game`.
 pub type Game = core::Game;
+
+/// Standard export of the more generic [`core::Game`] type.
+///
+/// # Note on Type Inference
+/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `game_modding::GameAccess`.
+pub type GameAccess<'a> = game_modding::GameAccess<'a>;

@@ -9,7 +9,7 @@ use super::*;
 /// Helper struct to enable [`GameModifier`]s to access to the game's internals.
 #[derive(PartialEq, Eq, Debug)]
 #[allow(unused, missing_docs)]
-pub struct GameAccess<'a, TetGen, PceRot> {
+pub struct GameAccess<'a, TetGen = StdTetGen, PceRot = StdPceRot> {
     pub config: &'a mut Configuration<PceRot>,
     pub state_init: &'a StateInitialization<TetGen>,
     pub state: &'a mut State<TetGen>,
@@ -141,7 +141,7 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
 
     /// This method allows a modifier to provide access to internal state the modifier would like to display.
     // FIXME: This could be more general (e.g. key-value store-like type) or a type determined by user.
-    fn stats(&self) -> &[&str];
+    fn stats(&self) -> &[String];
 
     /// Try to clone the modifier if possible.
     /// Otherwise return an error.
@@ -294,7 +294,7 @@ impl<TetGen, PceRot> GameModifier<TetGen, PceRot> for DebugMod {
         "".to_owned()
     }
 
-    fn stats(&self) -> &[&str] {
+    fn stats(&self) -> &[String] {
         &[]
     }
 

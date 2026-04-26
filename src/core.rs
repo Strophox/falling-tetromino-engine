@@ -34,6 +34,8 @@ pub type ButtonsState = [Option<InGameTime>; Button::VARIANTS.len()];
 pub type InGameTime = Duration;
 /// The internal RNG used by a game.
 pub type GameRng = ChaCha8Rng;
+/// The type used to store fall or luck curves.
+pub type DelayData = Either<DelayParameters, DelayTable>;
 /// Type alias for a stream of notifications with timestamps.
 pub type NotificationFeed = Vec<(Notification, InGameTime)>;
 
@@ -162,6 +164,21 @@ pub struct DelayTable {
     /// The entries of the table.
     #[cfg_attr(feature = "serde", serde(rename = "entries"))]
     entries: Vec<ExtDuration>,
+}
+
+/// A struct describing the behavior of soft dropping.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SoftDropSpeedup {
+    /// Optionally add a delay (lowerbound) to the first drop before continuing speed up.
+    /// This is analogous to DAS (delayed auto shift) for sideways movement.
+    #[cfg_attr(feature = "serde", serde(rename = "dad"))]
+    pub delayed_soft_drop: Option<ExtDuration>,
+    /// This field describes either:
+    /// - A factor by which to speed up current gravity ('Soft Drop Factor').
+    /// - An upper bound to how short the current fall delay should be ('Auto Drop Rate').
+    #[cfg_attr(feature = "serde", serde(rename = "sdf_or_adr"))]
+    pub factor_or_upperbound: Either<ExtNonNegF64, ExtDuration>,
 }
 
 /// Certain statistics for which an instance of [`Game`] can be checked against.
@@ -434,7 +451,7 @@ pub struct Configuration<PceRot = StdPceRot> {
     /// - One variant describes a *factor*: How many times faster than the current gravity falling should be.
     /// - The other variant describes an *upper bound*: The fall delay that should be used, if it is shorter than current gravity. Otherwise no change.
     #[cfg_attr(feature = "serde", serde(rename = "sdf"))]
-    pub soft_drop_speedup: Either<ExtNonNegF64, ExtDuration>,
+    pub soft_drop_speedup: SoftDropSpeedup,
 
     /// Specification of how fall delay gets calculated from the rest of the state.
     /// If `None`, lock delay equals fall delay.
@@ -492,7 +509,7 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
             fall_delay_curve: Either::Left(DelayParameters::constant(
                 Duration::from_millis(1000).into(),
             )),
-            soft_drop_speedup: Either::Right(Duration::from_millis(33).into()),
+            soft_drop_speedup: SoftDropSpeedup::classic(),
             lock_delay_curve: Some(Either::Left(DelayParameters::constant(
                 Duration::from_millis(500).into(),
             ))),
@@ -1037,7 +1054,7 @@ impl DelayTable {
 }
 
 /// Extension trait to allow umbrella access for an `Either<DelayParameters, DelayTable>`.
-pub trait ExtEitherParamsTable {
+pub trait ExtDelayData {
     /// Retrieve a delay value and check if it has hit its limit (usually lower bound).
     fn retrieve_and_check(
         &self,
@@ -1046,7 +1063,7 @@ pub trait ExtEitherParamsTable {
     ) -> (ExtDuration, bool);
 }
 
-impl ExtEitherParamsTable for Either<DelayParameters, DelayTable> {
+impl ExtDelayData for DelayData {
     fn retrieve_and_check(
         &self,
         lineclears: u32,
@@ -1057,6 +1074,24 @@ impl ExtEitherParamsTable for Either<DelayParameters, DelayTable> {
             Either::Right(table) => {
                 table.lookup_and_check(lineclears, update_delays_every_n_lineclears)
             }
+        }
+    }
+}
+
+impl SoftDropSpeedup {
+    /// Standard soft drop speedup, which simply multiplies the current gravity by 15x.
+    pub fn standard() -> Self {
+        Self {
+            delayed_soft_drop: None,
+            factor_or_upperbound: Either::Left(ExtNonNegF64::new(15.0).unwrap()),
+        }
+    }
+
+    /// Classic soft drop speedup, which waits 50ms (3 frames at 60 Hz) after the initial drop, and then drops every 33ms (2 frames at 60 Hz).
+    pub fn classic() -> Self {
+        Self {
+            delayed_soft_drop: Some(Duration::from_millis(67).into()),
+            factor_or_upperbound: Either::Right(Duration::from_millis(33).into()),
         }
     }
 }

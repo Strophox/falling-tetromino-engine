@@ -119,9 +119,9 @@ pub mod piece_rotation;
 pub mod tetromino_generation;
 
 pub use core::{
-    Board, Button, ButtonsState, CoordAdd, Coordinate, DelayData, DelayParameters, DelayTable,
+    Board, Button, ButtonsState, CoordAdd, Coordinate, DelayCurve, DelayParameters, DelayTable,
     GameEndCause, GameLimits, GameRng, HEIGHT, InGameTime, Input, LOCK_OUT_HEIGHT, Line,
-    Notification, NotificationFeed, Offset, Orientation, Piece, SoftDropSpeedup, Stat, Tetromino,
+    Notification, NotificationFeed, Offset, Orientation, Piece, SoftDropRate, Stat, Tetromino,
     TileID, UpdateGameError, WIDTH,
 };
 pub use game_building::GameBuilder;

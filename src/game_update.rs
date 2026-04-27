@@ -5,7 +5,7 @@ Handles what happens when [`Game::update`] is called.
 use either::Either;
 
 use crate::{
-    core::{Configuration, ExtDelayData, Game, Phase, State},
+    core::{Configuration, DelayCurveExt, Game, Phase, State},
     game_modding::Hook,
 };
 
@@ -626,11 +626,43 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             }
         }
 
-        // Teleports.
-        // Just instantly try to move piece all the way into applicable direction.
-        I::Activate(teleport @ (B::TeleDown | B::TeleLeft | B::TeleRight)) => {
-            let offset = match teleport {
-                B::TeleDown => (0, -1),
+        // Soft Drop.
+        // Instantly try to move piece one tile down.
+        // The locking is handled as part of a different check/system further.
+        I::Activate(B::DropSoft) => {
+            if let Ok(fallen_piece) = updated_piece.offset_on(&state.board, (0, -1)) {
+                updated_piece = fallen_piece;
+            }
+        }
+
+        // Hard Drop.
+        // Instantly try to move piece all the way down.
+        // The locking is handled as part of a different check/system further.
+        I::Activate(B::DropHard) => {
+            updated_piece = updated_piece.teleported(&state.board, (0, -1));
+
+            if config.send_notifications {
+                feed.push((
+                    Notification::HardDrop {
+                        height_dropped: previous_piece
+                            .position
+                            .1
+                            .abs_diff(updated_piece.position.1),
+                        dropped_piece: updated_piece,
+                    },
+                    input_time,
+                ));
+            }
+        }
+
+        // Teleport down / 'Sonic drop'.
+        // This is treated as Soft drop but only consisting of 0s-fall-delay, gravity-driven falls.
+        I::Activate(B::TeleDown) => {}
+
+        // Sideways teleports.
+        // Just instantly try to move piece all the way into applicable sideways direction.
+        I::Activate(tele_sideways @ (B::TeleLeft | B::TeleRight)) => {
+            let offset = match tele_sideways {
                 B::TeleLeft => (-1, 0),
                 B::TeleRight => (1, 0),
                 _ => unreachable!(),
@@ -655,35 +687,6 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
                     .rotate(&updated_piece, &state.board, right_turns)
             {
                 updated_piece = rotated_piece;
-            }
-        }
-
-        // Hard Drop.
-        // Instantly try to move piece all the way down.
-        // The locking is handled as part of a different check/system further.
-        I::Activate(B::DropHard) => {
-            updated_piece = updated_piece.teleported(&state.board, (0, -1));
-
-            if config.send_notifications {
-                feed.push((
-                    Notification::HardDrop {
-                        height_dropped: previous_piece
-                            .position
-                            .1
-                            .abs_diff(updated_piece.position.1),
-                        dropped_piece: updated_piece,
-                    },
-                    input_time,
-                ));
-            }
-        }
-
-        // Soft Drop.
-        // Instantly try to move piece one tile down.
-        // The locking is handled as part of a different check/system further.
-        I::Activate(B::DropSoft) => {
-            if let Ok(fallen_piece) = updated_piece.offset_on(&state.board, (0, -1)) {
-                updated_piece = fallen_piece;
             }
         }
 
@@ -830,7 +833,10 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     let updated_fall_or_lock_time = if updated_is_airborne {
         // Calculate scheduled fall time. See (¹).
         let fall_reset = !previous_is_airborne
-            || matches!(input, I::Activate(B::DropSoft) | I::Deactivate(B::DropSoft));
+            || matches!(
+                input,
+                I::Activate(B::TeleDown | B::DropSoft) | I::Deactivate(B::DropSoft)
+            );
         if fall_reset {
             // Refresh fall timer if we *started* falling, or soft drop just pressed, or soft drop just released.}
             let use_delayed_soft_drop = matches!(input, I::Activate(B::DropSoft));
@@ -1092,7 +1098,7 @@ fn do_fall<TetGen, PceRot>(
     };
 
     let updated_autoshift_scheduled = 'exp: {
-        let Some((is_left_shift, _dir_active_since, is_teleport)) =
+        let Some((is_left_shift, _dir_active_since, _is_teleport)) =
             calc_isleftshift_activesince_isteleport(&state.active_buttons)
         else {
             // No sensible movement information received.
@@ -1103,15 +1109,7 @@ fn do_fall<TetGen, PceRot>(
         if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
-            let autoshift_time = calc_next_autoshift_time(
-                config,
-                state,
-                fall_time,
-                _dir_active_since,
-                is_teleport,
-                updated_is_airborne,
-            );
-            break 'exp Some(autoshift_time);
+            break 'exp Some(fall_time);
         }
 
         // No changes need to be made.
@@ -1212,9 +1210,12 @@ fn do_lock<TetGen, PceRot>(
     });
 
     // Compute main Points Bonus.
-    let point_bonus = lineclears * if is_spin { 2 } else { 1 } * if is_perfect { 4 } else { 1 } * 2
-        - 1
-        + (combo - 1);
+    let point_bonus =
+        lineclears * lineclears * if is_spin { 4 } else { 1 } * if is_perfect { 4 } else { 1 }
+            + (combo - 1);
+    // let point_bonus = lineclears * if is_spin { 2 } else { 1 } * if is_perfect { 4 } else { 1 } * 2
+    //     - 1
+    //     + (combo - 1);
 
     if config.send_notifications {
         feed.push((
@@ -1265,49 +1266,51 @@ fn do_lines_clearing<TetGen, PceRot>(
                 .lineclears
                 .is_multiple_of(config.update_delays_every_n_lineclears)
             {
-                // Calculate new fall- and lock delay for game state.
-                if let Some(hit_at_n_lineclears) = state.fall_delay_lowerbound_hit_at_n_lineclears {
-                    // Fall delay zero was hit at some point, only possibly decrease lock delay now.
-
-                    if let Some(lock_delay_curve) = &config.lock_delay_curve {
-                        // Actually compute new delay from equation.
-                        let relevant_lineclears = state.lineclears - hit_at_n_lineclears;
-                        let (new_lock_delay, _lock_lowerbound_hit) = lock_delay_curve
-                            .retrieve_and_check(
-                                relevant_lineclears,
-                                config.update_delays_every_n_lineclears,
-                            );
-
-                        state.lock_delay = new_lock_delay;
-                    }
-                } else {
-                    // Decrease fall delay as normal.
-
-                    // Actually compute new delay from equation.
-                    let (new_fall_delay, fall_lowerbound_hit) =
-                        config.fall_delay_curve.retrieve_and_check(
-                            state.lineclears,
-                            config.update_delays_every_n_lineclears,
-                        );
-
-                    // Remember the first time fall delay hit zero.
-                    if fall_lowerbound_hit {
-                        state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
-                    }
-
-                    state.fall_delay = new_fall_delay;
-
-                    // If lock delay does not have its own curve, it is equal to the fall delay.
-                    if config.lock_delay_curve.is_none() {
-                        state.lock_delay = state.fall_delay;
-                    }
-                }
+                update_fall_and_lock_delays(config, state);
             }
         }
     }
 
     Phase::Spawning {
         spawn_time: clear_finish_time.saturating_add(config.spawn_delay),
+    }
+}
+
+fn update_fall_and_lock_delays<TetGen, PceRot>(
+    config: &Configuration<PceRot>,
+    state: &mut State<TetGen>,
+) {
+    // Calculate new fall- and lock delay for game state.
+    if let Some(hit_at_n_lineclears) = state.fall_delay_lowerbound_hit_at_n_lineclears {
+        // Fall delay zero was hit at some point, only possibly decrease lock delay now.
+
+        if let Some(lock_delay_curve) = &config.lock_delay_curve {
+            // Actually compute new delay from equation.
+            let relevant_lineclears = state.lineclears - hit_at_n_lineclears;
+            let (new_lock_delay, _lock_lowerbound_hit) = lock_delay_curve
+                .retrieve_and_check(relevant_lineclears, config.update_delays_every_n_lineclears);
+
+            state.lock_delay = new_lock_delay;
+        }
+    } else {
+        // Decrease fall delay as normal.
+
+        // Actually compute new delay from equation.
+        let (new_fall_delay, fall_lowerbound_hit) = config
+            .fall_delay_curve
+            .retrieve_and_check(state.lineclears, config.update_delays_every_n_lineclears);
+
+        // Remember the first time fall delay hit zero.
+        if fall_lowerbound_hit {
+            state.fall_delay_lowerbound_hit_at_n_lineclears = Some(state.lineclears);
+        }
+
+        state.fall_delay = new_fall_delay;
+
+        // If lock delay does not have its own curve, it is equal to the fall delay.
+        if config.lock_delay_curve.is_none() {
+            state.lock_delay = state.fall_delay;
+        }
     }
 }
 
@@ -1450,12 +1453,10 @@ fn calc_next_fall_time<TetGen, PceRot>(
     let fall_delay = if active_buttons[Button::TeleDown].is_some() {
         ExtDuration::ZERO
     } else if active_buttons[Button::DropSoft].is_some() {
-        if use_delayed_soft_drop
-            && let Some(delayed_soft_drop) = config.soft_drop_speedup.delayed_soft_drop
-        {
-            state.fall_delay.min(delayed_soft_drop)
+        if use_delayed_soft_drop && let Some(delayed_soft_drop) = config.delayed_soft_drop {
+            ExtDuration::Finite(delayed_soft_drop).min(state.fall_delay)
         } else {
-            match config.soft_drop_speedup.factor_or_upperbound {
+            match config.soft_drop_rate {
                 Either::Left(factor) => state.fall_delay.div_ennf64(factor),
                 Either::Right(upperbound) => state.fall_delay.min(upperbound),
             }

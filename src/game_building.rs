@@ -4,15 +4,11 @@ Customizing, templating and constructing [`Game`]s.
 
 use std::{collections::VecDeque, time::Duration};
 
-use either::Either;
 use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
-    core::{
-        Configuration, DelayTable, ExtDelayData, Game, Phase, SoftDropSpeedup, State,
-        StateInitialization,
-    },
+    core::{Configuration, DelayCurveExt, Game, Phase, SoftDropRate, State, StateInitialization},
     game_modding::Hook,
     tetromino_generation::StdTetGen,
 };
@@ -188,23 +184,26 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
         self.config.auto_repeat_rate = x;
         self
     }
+    /// Optionally add a delay (lowerbound) to the first soft drop before continuing speed up fallng.
+    /// This is analogous to DAS (delayed auto shift) seen in sideways movement.
+    pub fn delayed_soft_drop(&mut self, x: Option<Duration>) -> &mut Self {
+        self.config.delayed_soft_drop = x;
+        self
+    }
+    /// How soft drop should speed up the falling of a piece should speed up while [`Button::DropSoft`] is held, either:
+    /// - A factor by which to speed up current gravity ('Soft Drop Factor').
+    /// - An upper bound to how short the current fall delay should be ('Auto Drop Rate').
+    pub fn soft_drop_rate(&mut self, x: SoftDropRate) -> &mut Self {
+        self.config.soft_drop_rate = x;
+        self
+    }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn fall_delay_curve(&mut self, x: Either<DelayParameters, DelayTable>) -> &mut Self {
+    pub fn fall_delay_curve(&mut self, x: DelayCurve) -> &mut Self {
         self.config.fall_delay_curve = x;
         self
     }
-    /// How soft drop should speed up the falling of a piece should speed up while [`Button::DropSoft`] is held.
-    /// - One variant describes how many times faster than the current gravity falling should be.
-    /// - The other variant describes the fall delay that should be used, if it is faster than current gravity. Otherwise no change.
-    pub fn soft_drop_speedup(&mut self, x: SoftDropSpeedup) -> &mut Self {
-        self.config.soft_drop_speedup = x;
-        self
-    }
     /// Specification of how fall delay gets calculated from the rest of the state.
-    pub fn lock_delay_curve(
-        &mut self,
-        x: Option<Either<DelayParameters, DelayTable>>,
-    ) -> &mut Self {
+    pub fn lock_delay_curve(&mut self, x: Option<DelayCurve>) -> &mut Self {
         self.config.lock_delay_curve = x;
         self
     }

@@ -108,7 +108,7 @@ pub struct Piece {
     pub tetromino: Tetromino,
 
     /// In which way the tetromino is re-oriented.
-    #[cfg_attr(feature = "serde", serde(rename = "orn"))]
+    #[cfg_attr(feature = "serde", serde(rename = "ori"))]
     pub orientation: Orientation,
 
     /// The position of the active piece on a playing grid.
@@ -507,7 +507,7 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
                 Duration::from_millis(500).into(),
             ))),
             allow_lenient_lock_reset: false,
-            ensure_shift_delay_lt_lock_delay: false,
+            ensure_shift_delay_lt_lock_delay: true,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,
@@ -919,29 +919,46 @@ impl DelayParameters {
         factor: ExtNonNegF64,
         subtrahend: ExtDuration,
     ) -> Option<Self> {
-        Self::constant(Default::default())
-            .with_bounds(base_delay, lowerbound)?
-            .with_coefficients(factor, subtrahend)
+        let correct_bounds = lowerbound <= base_delay;
+        let correct_coefficients = factor <= 1.into();
+        (correct_bounds && correct_coefficients).then_some(Self {
+            base_delay,
+            factor,
+            subtrahend,
+            lowerbound,
+        })
     }
 
-    /// Create a modified delay parameters where only the bounds are changed.
-    pub fn with_bounds(&self, base_delay: ExtDuration, lowerbound: ExtDuration) -> Option<Self> {
-        let correct_bounds = lowerbound <= base_delay;
+    /// Creates modified delay parameters where only the base delay is changed.
+    pub fn with_base_delay(&self, base_delay: ExtDuration) -> Option<Self> {
+        let correct_bounds = self.lowerbound <= base_delay;
         correct_bounds.then_some(Self {
             base_delay,
+            ..*self
+        })
+    }
+
+    /// Creates modified delay parameters where only the lowerbound is changed.
+    pub fn with_lowerbound(&self, lowerbound: ExtDuration) -> Option<Self> {
+        let correct_bounds = lowerbound <= self.base_delay;
+        correct_bounds.then_some(Self {
             lowerbound,
             ..*self
         })
     }
 
     /// Create a modified delay parameters where only the coefficients are changed.
-    pub fn with_coefficients(&self, factor: ExtNonNegF64, subtrahend: ExtDuration) -> Option<Self> {
+    pub fn with_factor(&self, factor: ExtNonNegF64) -> Option<Self> {
         let correct_coefficients = factor <= 1.into();
-        correct_coefficients.then_some(Self {
-            factor,
+        correct_coefficients.then_some(Self { factor, ..*self })
+    }
+
+    /// Create a modified delay parameters where only the coefficients are changed.
+    pub fn with_subtrahend(&self, subtrahend: ExtDuration) -> Self {
+        Self {
             subtrahend,
             ..*self
-        })
+        }
     }
 
     /// Delay equation which does not change at all with number of linescleared.
@@ -1040,7 +1057,7 @@ impl DelayTable {
         // Calculate how many times we should've progressed.
         let raw_idx = lineclears / 1.max(update_delays_every_n_lineclears);
         // Saturate to last entry.
-        let idx = (raw_idx as usize).min(self.entries.len());
+        let idx = (raw_idx as usize).min(self.entries.len() - 1);
 
         (self.entries[idx], idx == self.entries.len() - 1)
     }

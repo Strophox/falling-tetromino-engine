@@ -8,8 +8,9 @@ use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
-    core::{Configuration, DelayCurveExt, Game, Phase, SoftDropRate, State, StateInitialization},
+    core::{Configuration, Game, Phase, SoftDropRate, State, StateInitialization},
     game_modding::Hook,
+    game_update::update_fall_and_lock_delays,
     tetromino_generation::StdTetGen,
 };
 
@@ -66,44 +67,39 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
             .tetromino_generator
             .clone()
             .unwrap_or_else(|| TetGen::from_rng(&mut rng));
-        let config = self.config.clone();
 
-        let (fall_delay, fall_lowerbound_hit) = config
-            .fall_delay_curve
-            .retrieve_and_check(0, config.update_delays_every_n_lineclears);
-        let lock_delay = if let Some(lock_delay_curve) = &config.lock_delay_curve {
-            lock_delay_curve
-                .retrieve_and_check(0, config.update_delays_every_n_lineclears)
-                .0
-        } else {
-            fall_delay
+        let state_init = StateInitialization {
+            seed,
+            tetromino_generator: tetromino_generator.clone(),
         };
+
+        let config = self.config.clone();
+        let mut state = State {
+            time: InGameTime::ZERO,
+            active_buttons: [None; Button::VARIANTS.len()],
+            rng,
+            piece_generator: tetromino_generator,
+            piece_preview: VecDeque::new(),
+            piece_held: None,
+            board: Board::default(),
+            fall_delay: ExtDuration::default(),
+            fall_delay_lowerbound_hit_at_n_lineclears: None,
+            lock_delay: ExtDuration::default(),
+            pieces_locked: [0; Tetromino::VARIANTS.len()],
+            lineclears: 0,
+            consecutive_lineclears: 0,
+            points: 0,
+        };
+
+        update_fall_and_lock_delays(&config, &mut state);
 
         let mut game = Game {
             modifiers,
             phase: Phase::Spawning {
                 spawn_time: InGameTime::ZERO,
             },
-            state: State {
-                time: InGameTime::ZERO,
-                active_buttons: [None; Button::VARIANTS.len()],
-                rng,
-                piece_generator: tetromino_generator.clone(),
-                piece_preview: VecDeque::new(),
-                piece_held: None,
-                board: Board::default(),
-                fall_delay,
-                fall_delay_lowerbound_hit_at_n_lineclears: fall_lowerbound_hit.then_some(0),
-                lock_delay,
-                pieces_locked: [0; Tetromino::VARIANTS.len()],
-                lineclears: 0,
-                consecutive_lineclears: 0,
-                points: 0,
-            },
-            state_init: StateInitialization {
-                seed,
-                tetromino_generator,
-            },
+            state,
+            state_init,
             config,
         };
 

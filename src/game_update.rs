@@ -750,64 +750,8 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
 
     // Epilogue. Finalize state updates.
 
-    // Update movetimer and rest of movement stuff.
-    // See also (³).
-
-    let updated_autoshift_scheduled = 'exp: {
-        let Some((is_shifting_left, dir_active_since, is_teleport)) =
-            calc_isleftshift_activesince_isteleport(updated_active_buttons)
-        else {
-            // No sensible movement information received.
-            break 'exp None;
-        };
-
-        // Handle case where movement-related input was handled.
-        if let Some(reschedule_autoshift) = autoshift_sentinel {
-            if reschedule_autoshift {
-                // Reschedule autonomous movement.
-                let is_airborne = updated_piece.is_airborne(&state.board);
-                let autoshift_time = calc_next_autoshift_time(
-                    config,
-                    state,
-                    input_time,
-                    dir_active_since,
-                    is_teleport,
-                    is_airborne,
-                );
-                break 'exp Some(autoshift_time);
-            }
-
-            // FIXME: Abandoned code.
-            // if cancel_autoshift {
-            //     // Buttons deactivated; Cancel autonomous movement.
-            //     break 'exp None; // Buttons unpressed: Remove autonomous movement.
-            // }
-
-            // No relevant movement changes caused by mvmt-related button input: Don't do anything.
-            break 'exp previous_autoshift_scheduled;
-        }
-
-        // Otherwise wasn't a move-related
-        let dx = if is_shifting_left { -1 } else { 1 };
-        if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
-            let is_airborne = updated_piece.is_airborne(&state.board);
-            let autoshift_time = calc_next_autoshift_time(
-                config,
-                state,
-                input_time,
-                dir_active_since,
-                is_teleport,
-                is_airborne,
-            );
-            // Due to the system mentioned in (⁴), we check
-            // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
-            break 'exp Some(autoshift_time);
-        }
-
-        // All checks passed, no changes need to be made.
-        // This is the case where neither (³) or (⁴) apply.
-        previous_autoshift_scheduled
-    };
+    // Immutable.
+    let updated_piece = updated_piece;
 
     // Update `lowest_y`, re-set `lock_time_cap` if applicable.
     let (updated_lowest_y, updated_lock_cap_time) = if updated_piece.position.1 < previous_lowest_y
@@ -884,6 +828,81 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             // Previous lock time.
             previous_fall_or_lock_time
         }
+    };
+
+    // Update movetimer and rest of movement stuff.
+    // See also (³).
+    let updated_autoshift_scheduled = 'exp: {
+        let Some((is_shifting_left, dir_active_since, is_teleport)) =
+            calc_isleftshift_activesince_isteleport(updated_active_buttons)
+        else {
+            // No sensible movement information received, cancel autoshift.
+            break 'exp None;
+        };
+
+        let mut next_autoshift_time = calc_next_autoshift_time(
+            config,
+            state,
+            input_time,
+            dir_active_since,
+            is_teleport,
+            updated_is_airborne,
+        );
+        // TODO
+        if config.ensure_shift_delay_lt_lock_delay
+            && !updated_is_airborne
+            && next_autoshift_time > updated_fall_or_lock_time
+        {
+            next_autoshift_time = updated_fall_or_lock_time;
+        }
+
+        // Handle case where movement-related input was handled.
+        if let Some(reschedule_autoshift) = autoshift_sentinel {
+            if reschedule_autoshift {
+                // Reschedule autonomous movement.
+                break 'exp Some(next_autoshift_time);
+            }
+
+            // FIXME: Abandoned code.
+            // if cancel_autoshift {
+            //     // Buttons deactivated; Cancel autonomous movement.
+            //     break 'exp None; // Buttons unpressed: Remove autonomous movement.
+            // }
+
+            // No relevant movement changes caused by mvmt-related button input: Don't do anything.
+            break 'exp previous_autoshift_scheduled;
+        }
+
+        // Otherwise wasn't a move-related action.
+
+        // Check if piece fell down and can immediately move
+        let dx = if is_shifting_left { -1 } else { 1 };
+        if check_piece_became_newly_movable(previous_piece, updated_piece, &state.board, dx) {
+            // Due to the system mentioned in (⁴), we check
+            // if the piece was stuck and became unstuck, and insert an autonomous move.
+            if matches!(input, I::Activate(B::DropSoft)) {
+                // If it was just a fall, make it immediate.
+                break 'exp Some(input_time);
+            } else {
+                // Otherwise...
+                break 'exp Some(next_autoshift_time);
+            }
+        }
+
+        // TODO
+        // If piece had an automatic move scheduled and now landed and is about to lock and it would lock *before* the autoshift triggers, ensure the shift is truncated to be faster.
+        if config.ensure_shift_delay_lt_lock_delay
+            && previous_is_airborne
+            && !updated_is_airborne
+            && let Some(previous_autoshift_time) = previous_autoshift_scheduled
+            && previous_autoshift_time > updated_fall_or_lock_time
+        {
+            break 'exp Some(updated_fall_or_lock_time);
+        }
+
+        // All checks passed, no changes need to be made.
+        // This is the case where neither (³) or (⁴) apply.
+        previous_autoshift_scheduled
     };
 
     // 'Update' ActionState;
@@ -1086,6 +1105,7 @@ fn do_fall<TetGen, PceRot>(
         (previous_lowest_y, previous_lock_cap_time)
     };
 
+    let previous_is_airborne = previous_piece.is_airborne(&state.board);
     let updated_is_airborne = updated_piece.is_airborne(&state.board);
 
     let updated_fall_or_lock_time = if updated_is_airborne {
@@ -1101,15 +1121,25 @@ fn do_fall<TetGen, PceRot>(
         let Some((is_left_shift, _dir_active_since, _is_teleport)) =
             calc_isleftshift_activesince_isteleport(&state.active_buttons)
         else {
-            // No sensible movement information received.
+            // No sensible movement information received, cancel autoshift.
             break 'exp None;
         };
 
         let dx = if is_left_shift { -1 } else { 1 };
-        if check_piece_became_movable(previous_piece, updated_piece, &state.board, dx) {
+        if check_piece_became_newly_movable(previous_piece, updated_piece, &state.board, dx) {
             // Due to the system mentioned in (⁴), we check
             // if the piece was stuck and became unstuck, and insert an immediate autonomous move.
             break 'exp Some(fall_time);
+        }
+
+        // If piece had an automatic move scheduled and now landed and is about to lock and would lock *before* the autshift triggers, ensure the shift is truncated to be faster.
+        if config.ensure_shift_delay_lt_lock_delay
+            && previous_is_airborne
+            && !updated_is_airborne
+            && let Some(previous_autoshift_time) = previous_autoshift_scheduled
+            && previous_autoshift_time > updated_fall_or_lock_time
+        {
+            break 'exp Some(updated_fall_or_lock_time);
         }
 
         // No changes need to be made.
@@ -1276,11 +1306,11 @@ fn do_lines_clearing<TetGen, PceRot>(
     }
 }
 
-fn update_fall_and_lock_delays<TetGen, PceRot>(
+/// Update the fall and lock delay of a game [`State`] according to a given [`Configuration`] (containing delay curves for falling and locking).
+pub fn update_fall_and_lock_delays<TetGen, PceRot>(
     config: &Configuration<PceRot>,
     state: &mut State<TetGen>,
 ) {
-    // Calculate new fall- and lock delay for game state.
     if let Some(hit_at_n_lineclears) = state.fall_delay_lowerbound_hit_at_n_lineclears {
         // Fall delay zero was hit at some point, only possibly decrease lock delay now.
 
@@ -1293,7 +1323,7 @@ fn update_fall_and_lock_delays<TetGen, PceRot>(
             state.lock_delay = new_lock_delay;
         }
     } else {
-        // Decrease fall delay as normal.
+        // Calculate decreased fall delay and (semi)fixed lock delay as normal.
 
         // Actually compute new delay from equation.
         let (new_fall_delay, fall_lowerbound_hit) = config
@@ -1307,8 +1337,13 @@ fn update_fall_and_lock_delays<TetGen, PceRot>(
 
         state.fall_delay = new_fall_delay;
 
-        // If lock delay does not have its own curve, it is equal to the fall delay.
-        if config.lock_delay_curve.is_none() {
+        if let Some(lock_curve) = &config.lock_delay_curve {
+            // If lock delay does have its own curve, update lock delay to fall delay if that is longer
+            let (lock_delay, _) = lock_curve
+                .retrieve_and_check(state.lineclears, config.update_delays_every_n_lineclears);
+            state.lock_delay = lock_delay.max(state.fall_delay);
+        } else {
+            // If lock delay does not have its own curve, it is equal to the fall delay.
             state.lock_delay = state.fall_delay;
         }
     }
@@ -1339,7 +1374,7 @@ fn calc_updated_active_buttons(
     previous_active_buttons
 }
 
-fn check_piece_became_movable(
+fn check_piece_became_newly_movable(
     previous_piece: Piece,
     updated_piece: Piece,
     board: &Board,
@@ -1417,12 +1452,12 @@ fn calc_next_autoshift_time<TetGen, PceRot>(
     state: &State<TetGen>,
     current_time: InGameTime,
     dir_active_since: InGameTime,
-    is_teleport: bool,
-    is_airborne: bool,
+    shift_is_teleport: bool,
+    piece_is_airborne: bool,
 ) -> InGameTime {
     let mut shift_delay =
         if current_time.saturating_sub(dir_active_since) >= config.delayed_auto_shift {
-            if is_teleport {
+            if shift_is_teleport {
                 InGameTime::ZERO
             } else {
                 config.auto_repeat_rate
@@ -1432,7 +1467,7 @@ fn calc_next_autoshift_time<TetGen, PceRot>(
         };
 
     if config.ensure_shift_delay_lt_lock_delay
-        && !is_airborne
+        && !piece_is_airborne
         && let ExtDuration::Finite(lock_delay) = state.lock_delay
         && shift_delay > lock_delay
     {

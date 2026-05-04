@@ -25,16 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `struct DebugMod` (impls `GameModifier)
 
 ### Changed
+- Scoring formula has changed.
 - `Game` and various other types internally (`core`) use general `TetrominoGenerator`s and `PieceRotator`s.
 - Renames:
     * internal modules.
     * `Phase::LinesClearing` -> `::ClearingLines`
     * `GameEndCause::TopOut` -> `::BufferOut`
+    * `State::{piece_generator,piece_preview,piece_held}` -> `::{tetromino_generator,tetromino_preview,tetromino_held}`
 - `Piece::orientation` is now serialized as `ori`.
 - Switch to Rust Edition 2024, v1.95.0.
 - Game `HEIGHT` is now 32.
 
 ### Fixed
+- Locking a piece that is not fully on board does not crash the engine anymore, but only locks the relevant tiles.
 - `ensure_shift_delay_lt_lock_delay`:
     * When a piece is auto-shifting and touches the ground, it will readjust its next auto-shift to happen sooner in case lock would be faster. (E.g.: moving left, auto-shift at 2.2s, but piece hits ground at 2.0s and wants to lock down at 2.1s -> auto-shift happens at 2.1s (before lock) and refreshes the lock and auto-shift timers as well.)
     * When a piece is auto-shifting and already on the ground, and one direction is released but the other direction is still active, it will readjust its next auto-shift to happen sooner in case lock would be faster. (E.g.: moving left, release left but right is held with auto-shift at 4.4s, but lock would occur at 4.2s -> auto-shift happens at 4.2s (before lock) and refreshes the lock and auto-shift timers as well.)

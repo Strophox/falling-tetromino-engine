@@ -551,11 +551,11 @@ pub struct State<TetGen = StdTetGen> {
     /// The internal pseudo random number generator used.
     pub rng: GameRng,
     /// The method (and internal state) of tetromino generation used.
-    pub piece_generator: TetGen,
+    pub tetromino_generator: TetGen,
     /// Upcoming pieces to be played.
-    pub piece_preview: VecDeque<Tetromino>,
+    pub tetromino_preview: VecDeque<Tetromino>,
     /// Data about the piece being held. `true` denotes that the held piece can be swapped back in.
-    pub piece_held: Option<(Tetromino, bool)>,
+    pub tetromino_held: Option<(Tetromino, bool)>,
     /// The main playing grid storing empty (`None`) and filled, fixed tiles (`Some(nz_u32)`).
     pub board: Board,
     /// The current duration a piece takes to fall one unit.

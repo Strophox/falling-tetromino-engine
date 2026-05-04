@@ -78,11 +78,12 @@ It should already incorporate many features desired by familiar/experienced play
 - **Tetromino randomizers**: 'Uniform', 'Stock' (generalized Bag), 'Recency' (history), 'Balance-out',
 - **Piece preview** (arbitrary size),
 - **Spawn delay** (ARE),
-- **Spawn actions** (IRS/IHS; by keeping rotate/hold pressed during spawn),
+- **Spawn manipulation** (IRS/IHS/IMS/ITS; by keeping rotate/hold/move/teleport pressed during spawn),
 - **Rotation systems**: 'Ocular' (engine-specific, playtested), 'Classic', 'Super',
 - **Delayed auto-move** (DAS),
 - **Auto-move rate** (ARR),
-- **Soft drop factor** (SDF),
+- **Soft drop rate** (SDF),
+- **Delayed soft drop** ('DAS but for Soft drop'),
 - **Customizable gravity/fall and lock delay curves** (exponential and/or linear; also, '20G' (fall rate of ≥1200 Hz) just becomes ≤00083s fall delay),
 - **Ensure move delay less than lock delay** toggle (i.e. DAS/ARR are automatically shortened when lock delay is very low),
 - **Allow lenient lock-reset** toggle (i.e. reset lock delay even if rotate/move fails),
@@ -95,9 +96,9 @@ It should already incorporate many features desired by familiar/experienced play
 The basics seem to have been figured out through many iterative improvements.
 Ongoing areas of investigation (to improve generalization) are:
 - Choice of `Notification`s provided to frontend clients;
-- Choice of update `Hook`s for modding clients;
-- Choice of `Stat`s to query game with or make game automatically halt;
-- Various engine generalizations for engine clients that want to plug custom behavior for currently-hardcoded structures.
+- Choice of update hooks for modding clients;
+- Choice of natively supported `Stat`s to query game with or make game automatically halt;
+- Various engine and modding generalizations for clients that want to plug custom behavior for currently-hardcoded structures.
 
 
 ## Implementation Idea
@@ -159,34 +160,35 @@ impl Game {
 struct Configuration {
     generate_piece_preview: usize,
     allow_spawn_actions: bool,
-    rotation_system: RotationSystem,
+    rotation_system: impl PieceRotator,
     spawn_delay: Duration,
     delayed_auto_shift: Duration,
     auto_repeat_rate: Duration,
-    fall_delay_params: DelayParameters,
-    soft_drop_factor: ExtNonNegF64,
-    lock_delay_params: DelayParameters,
+    delayed_soft_drop: Option<Duration>
+    soft_drop_rate: Either<ExtNonNegF64, ExtDuration>,
+    fall_delay_params: Either<DelayParameters, DelayTable>,
+    lock_delay_params: Option<Either<DelayParameters, DelayTable>>,
     ensure_move_delay_lt_lock_delay: bool,
     allow_lenient_lock_reset: bool,
     lock_reset_cap_factor: ExtNonNegF64,
     line_clear_duration: Duration,
     update_delays_every_n_lineclears: u32,
-    game_limits: Vec<(Stat, bool)>,
-    notification_level: NotificationLevel,
+    game_limits: GameLimits,
+    send_notifiations: bool,
 }
 
 struct StateInitialization {
     seed: u64,
-    tetromino_generator: TetrominoGenerator,
+    tetromino_generator: impl TetrominoGenerator,
 }
 
 struct State {
     time: InGameTime,
     active_buttons: [Option<InGameTime>; Button::VARIANTS.len()],
     rng: GameRng,
-    piece_generator: TetrominoGenerator,
-    piece_preview: VecDeque<Tetromino>,
-    piece_held: Option<(Tetromino, bool)>,
+    tetromino_generator: impl TetrominoGenerator,
+    tetromino_preview: VecDeque<Tetromino>,
+    tetromino_held: Option<(Tetromino, bool)>,
     board: [[Option<TileID>; Game::WIDTH]; Game::HEIGHT],
     fall_delay: ExtDuration,
     fall_delay_lowerbound_hit_at_n_lineclears: Option<u32>,
@@ -245,14 +247,14 @@ struct DelayParameters {
 }
 
 enum Notification {
+    HardDrop {
+        height_dropped: usize,
+        dropped_piece: Piece,
+    },
     PieceLocked { piece: Piece },
     LinesClearing {
         y_coords: Vec<usize>,
         line_clear_duration: InGameTime,
-    },
-    HardDrop {
-        height_dropped: usize,
-        dropped_piece: Piece,
     },
     Accolade {
         points_bonus: u32,
@@ -265,7 +267,6 @@ enum Notification {
     GameEnded {
         is_win: bool,
     },
-    Debug(String),
     Custom(String),
 }
 
@@ -276,7 +277,7 @@ enum UpdateGameError { TargetTimeInPast, AlreadyEnded, }
 enum GameEndCause {
     LockOut { locking_piece: Piece },
     BlockOut { blocked_piece: Piece },
-    TopOut { blocked_lines: Vec<Line> },
+    BufferOut { overflowing_lines: Vec<Line> },
     Limit(Stat),
     Forfeit { piece_in_play: Option<Piece> },
     Custom(String),

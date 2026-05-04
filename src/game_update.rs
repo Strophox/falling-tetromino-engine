@@ -338,20 +338,20 @@ fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
     spawn_time: InGameTime,
 ) -> Phase {
     // Take a tetromino.
-    let next_tetromino = state.piece_preview.pop_front().unwrap_or_else(|| {
+    let next_tetromino = state.tetromino_preview.pop_front().unwrap_or_else(|| {
         state
-            .piece_generator
+            .tetromino_generator
             .using_rng(&mut state.rng)
             .next()
             .expect("piece generator empty before game end")
     });
 
     // Only put back in if necessary (e.g. if piece_preview_count < next_pieces.len()).
-    state.piece_preview.extend(
-        state.piece_generator.using_rng(&mut state.rng).take(
+    state.tetromino_preview.extend(
+        state.tetromino_generator.using_rng(&mut state.rng).take(
             config
                 .generate_piece_preview
-                .saturating_sub(state.piece_preview.len()),
+                .saturating_sub(state.tetromino_preview.len()),
         ),
     );
 
@@ -853,11 +853,11 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             is_teleport,
             updated_is_airborne,
         );
-        
+
         // Handle case where movement-related input was handled.
         if let Some(reschedule_autoshift) = autoshift_sentinel {
             if reschedule_autoshift {
-                // Handle the case where we need to ensure the new auto-shift happens before lock. 
+                // Handle the case where we need to ensure the new auto-shift happens before lock.
                 if config.ensure_shift_delay_lt_lock_delay
                     && !updated_is_airborne
                     && next_autoshift_time > updated_fall_or_lock_time
@@ -929,10 +929,10 @@ fn try_do_hold<TetGen>(
     tetromino: Tetromino,
     next_spawn_time: InGameTime,
 ) -> Option<Phase> {
-    match state.piece_held {
+    match state.tetromino_held {
         // Nothing held yet, just hold spawned tetromino.
         None => {
-            state.piece_held = Some((tetromino, false));
+            state.tetromino_held = Some((tetromino, false));
             // Issue a spawn.
             Some(Phase::Spawning {
                 spawn_time: next_spawn_time,
@@ -940,9 +940,9 @@ fn try_do_hold<TetGen>(
         }
         // Swap spawned tetromino, push held back into next pieces queue.
         Some((held_tet, true)) => {
-            state.piece_held = Some((tetromino, false));
+            state.tetromino_held = Some((tetromino, false));
             // Cause the next spawn to specially be the piece we held.
-            state.piece_preview.push_front(held_tet);
+            state.tetromino_preview.push_front(held_tet);
             // Issue a spawn.
             Some(Phase::Spawning {
                 spawn_time: next_spawn_time,
@@ -1198,7 +1198,9 @@ fn do_lock<TetGen, PceRot>(
     // Locking.
     for ((x, y), tile_id) in piece.tiles() {
         // Put tile into board.
-        state.board[y as usize][x as usize] = Some(tile_id);
+        if (0..WIDTH).contains(&(x as usize)) && (0..HEIGHT).contains(&(y as usize)) {
+            state.board[y as usize][x as usize] = Some(tile_id);
+        }
     }
 
     if config.send_notifications {
@@ -1209,7 +1211,7 @@ fn do_lock<TetGen, PceRot>(
     state.pieces_locked[piece.tetromino as usize] += 1;
 
     // Update ability to hold piece.
-    if let Some((_held_tet, swap_allowed)) = &mut state.piece_held {
+    if let Some((_held_tet, swap_allowed)) = &mut state.tetromino_held {
         *swap_allowed = true;
     }
 
@@ -1293,10 +1295,10 @@ fn do_lines_clearing<TetGen, PceRot>(
     for y in (0..HEIGHT).rev() {
         // Full line: move it to the cleared lines storage and push an empty line to the board.
         if state.board[y].iter().all(|tile| tile.is_some()) {
-            // Starting from the offending line, we move down all others, then default the uppermost.
+            // We 'default out' the offending line, then move down all others.
+            state.board[y] = Line::default();
             state.board[y..].rotate_left(1);
-            // FIXME: This could underflow.
-            state.board[HEIGHT - 1] = Line::default();
+
             state.lineclears += 1;
 
             // Increment level if update requested.

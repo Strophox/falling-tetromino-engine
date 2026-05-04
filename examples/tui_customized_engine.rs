@@ -21,7 +21,7 @@ type Game = falling_tetromino_engine::core::Game<UniformGenerator, LazyRotator>;
 // Our custom tetromino generator.
 // It is very simple: It just picks tetrominos completely randomly*.
 //
-// (*This means it doesn't need to remember any history or other data: It is memoryless.)
+// (*This also means it doesn't need to remember any history / additional data. It is memoryless.)
 #[derive(Clone)]
 struct UniformGenerator;
 
@@ -42,9 +42,9 @@ impl TetrominoGenerator for UniformGenerator {
 // Our custom rotation system.
 // It is very simple: It doesn't actually do any kicks when changing orientation*.
 //
-// (*Instead, it just relies on how the engine outputs raw piece offset data,
-// which is always aligned to bottom left coordinate of a piece.
-// For example, 'I' will always pivot around it lower left unit. Try it out!)
+// (*Instead, it relies on how the engine stores the cell offsets of a positioned piece,
+// which is aligned to bottom left coordinate of the whole piece.
+// For example: 'I' will always pivot around its lowest leftmost cell. Try it out.)
 struct LazyRotator;
 
 impl PieceRotator for LazyRotator {
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(Duration::from_secs_f32(1. / 60.));
 
         // Go ahead and process all available inputs, where the updated in-game time = IRL-time-elapsed.
-        let in_game_update_time = game_start.elapsed();
+        let in_game_target_time = game_start.elapsed();
         let mut at_least_one_button_input = false;
         'process_inputs: while event::poll(Duration::ZERO)? {
             let event::Event::Key(key_event) = event::read()? else {
@@ -102,19 +102,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 KeyCode::Char(' ') => Button::HoldPiece,
                 _ => continue, // Don't care about: other `KeyEvent`s.
             };
-            match game.update(in_game_update_time, Some(Input::Activate(button))) {
+            match game.update(in_game_target_time, Some(Input::Activate(button))) {
                 Err(UpdateGameError::AlreadyEnded) => break 'process_inputs,
                 Err(UpdateGameError::TargetTimeInPast) => unreachable!(),
                 Ok(_notifs) => {}
             }
             // To not leave a button 'held' indefinitely, we unpress it immediately.
-            let _ = game.update(in_game_update_time, Some(Input::Deactivate(button)));
+            let _ = game.update(in_game_target_time, Some(Input::Deactivate(button)));
             at_least_one_button_input = true;
         }
 
         // Ensure game is updated even when no new inputs have been processed.
         if !at_least_one_button_input {
-            let _ = game.update(in_game_update_time, None);
+            let _ = game.update(in_game_target_time, None);
         }
 
         // Calculate board state to show.

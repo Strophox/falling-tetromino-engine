@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Prepare terminal to read user inputs directly.
+
     terminal::enable_raw_mode()?;
     let game_start = Instant::now();
     let mut board_state = game.state().board;
@@ -28,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(Duration::from_secs_f32(1. / 60.));
 
         // Go ahead and process all available inputs, where the updated in-game time = IRL-time-elapsed.
-        let in_game_update_time = game_start.elapsed();
+        let in_game_target_time = game_start.elapsed();
         let mut at_least_one_button_input = false;
         'process_inputs: while event::poll(Duration::ZERO)? {
             let event::Event::Key(key_event) = event::read()? else {
@@ -52,19 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 KeyCode::Char(' ') => Button::HoldPiece,
                 _ => continue, // Don't care about: other `KeyEvent`s.
             };
-            match game.update(in_game_update_time, Some(Input::Activate(button))) {
+            match game.update(in_game_target_time, Some(Input::Activate(button))) {
                 Err(UpdateGameError::AlreadyEnded) => break 'process_inputs,
                 Err(UpdateGameError::TargetTimeInPast) => unreachable!(),
                 Ok(_notifs) => {}
             }
             // To not leave a button 'held' indefinitely, we unpress it immediately.
-            let _ = game.update(in_game_update_time, Some(Input::Deactivate(button)));
+            let _ = game.update(in_game_target_time, Some(Input::Deactivate(button)));
             at_least_one_button_input = true;
         }
 
         // Ensure game is updated even when no new inputs have been processed.
         if !at_least_one_button_input {
-            let _ = game.update(in_game_update_time, None);
+            let _ = game.update(in_game_target_time, None);
         }
 
         // Calculate board state to show.

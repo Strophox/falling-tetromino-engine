@@ -8,12 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Renamed internal modules.
-- Renamed `Phase::LinesClearing -> ::ClearingLines`.
-- *(Unreleased changes might not logged at this point, use something akin to `git diff vX.Y.Z HEAD` using latest `vX.Y.Z`.)*
-- Added `struct SoftDropSpeedup`.
-- Added `struct DelayTable` and `type DelayData = Either<DelayParams, DelayTable>`.
+- *NOTE: Unreleased changes might not be comprehensive. `git diff vX.Y.Z HEAD` (with latest `vX.Y.Z`) can be used to see full diff.*
 
+
+## [9.0.0] - 2026-05-03
+
+### Added
+- Examples folder (run with `cargo run --example`): 'tui' and 'tui_customized_engine'.
+- `trait TetrominoGenerator`, `struct StdTetGen`.
+- `trait PieceRotator`, `struct StdPceRot`.
+- `struct DelayTable`,
+- `type DelayData = Either<DelayParams, DelayTable>`.
+- `type SoftDropRate = Either<ExtNonNegF64, ExtDuration>`.
+- `Configuration::delayed_soft_drop`
+- `GameModifier::stats`
+- `struct DebugMod` (impls `GameModifier)
+
+### Changed
+- `Game` and various other types internally (`core`) use general `TetrominoGenerator`s and `PieceRotator`s.
+- Renames:
+    * internal modules.
+    * `Phase::LinesClearing` -> `::ClearingLines`
+    * `GameEndCause::TopOut` -> `::BufferOut`
+- `Piece::orientation` is now serialized as `ori`.
+- Switch to Rust Edition 2024, v1.95.0.
+- Game `HEIGHT` is now 32.
+
+### Fixed
+- `ensure_shift_delay_lt_lock_delay`:
+    * When a piece is auto-shifting and touches the ground, it will readjust its next auto-shift to happen sooner in case lock would be faster. (E.g.: moving left, auto-shift at 2.2s, but piece hits ground at 2.0s and wants to lock down at 2.1s -> auto-shift happens at 2.1s (before lock) and refreshes the lock and auto-shift timers as well.)
+    * When a piece is auto-shifting and already on the ground, and one direction is released but the other direction is still active, it will readjust its next auto-shift to happen sooner in case lock would be faster. (E.g.: moving left, release left but right is held with auto-shift at 4.4s, but lock would occur at 4.2s -> auto-shift happens at 4.2s (before lock) and refreshes the lock and auto-shift timers as well.)
+
+### Removed
+- `struct NotificationLevel`, variant `Notification::Debug`.
 
 ## [8.2.0] - 2026-04-17
 

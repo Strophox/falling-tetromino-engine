@@ -7,6 +7,7 @@ Subtype of [`f64`] where `+0.0 ≤ value ≤ +∞`.
 /// In precise terms, an extended non-negative `f64` consists of all `value: f64`s that fulfil `0.0f64.total_cmp(&value).is_le() && !value.is_nan()`.
 ///
 /// Unlike `f64`, `ExNonNegF64` does implement [`Eq`], [`Ord`], [`std::hash::Hash`].
+// FIXME: This needs to have a custom deserialization so faulty f64's cannot be injected and break expectations (~ an INVARIANT)!
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtNonNegF64(f64);

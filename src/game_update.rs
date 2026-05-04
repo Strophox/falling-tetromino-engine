@@ -595,11 +595,11 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     The table has nontrivial complexity but from it we can derive expressions to
     for the things we actually care about (convention: `lrLR` refer to old state):
     * (ˢ) *Setting auto-move time*:
-          Actv_R  ||  Actv_L  ||  L==R  ||  L>R !Deact_R  ||  L<R !Deact_L
+          Actv_R  ||  Actv_L  ||  L==R  ||  L>R !Deact_r  ||  L<R !Deact_l
       Or:
-          !(Deact_L !L>=R || Deact_R !L=<R)
+          !(Deact_l !L>=R || Deact_r !L=<R)
     * (ᶜ) *Canceling auto-move time*:
-          L r Deact_l  ||  r L Deact_L
+          L r Deact_l  ||  r L Deact_l
     * *Performing immediate move*; Same as (ˢ)!
 
     ### Move Resumption [⁴]
@@ -716,7 +716,12 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
                 !(a || b)
             };
 
-            // FIXME: Abandoned code.
+            // NOTE: Abandoned code.
+            // The following commented code originally served to explicitly get rid of scheduled auto-shifts
+            // in case every mvmt button was released. However, in the new system we compute the
+            // 'direction of current movement' dynamically from the button state. So if there are
+            // No buttons pressed anymore we do not even proceed further, and delete any auto-mvmt.
+            //
             // *Canceling auto-move time*: L r Deact_l  ||  r L Deact_L
             // let cancel_autoshift = {
             //     let a = l && !r && matches!(input, I::Deactivate(B::MoveLeft));
@@ -840,7 +845,7 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             break 'exp None;
         };
 
-        let mut next_autoshift_time = calc_next_autoshift_time(
+        let next_autoshift_time = calc_next_autoshift_time(
             config,
             state,
             input_time,
@@ -848,18 +853,18 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             is_teleport,
             updated_is_airborne,
         );
-        // TODO
-        if config.ensure_shift_delay_lt_lock_delay
-            && !updated_is_airborne
-            && next_autoshift_time > updated_fall_or_lock_time
-        {
-            next_autoshift_time = updated_fall_or_lock_time;
-        }
-
+        
         // Handle case where movement-related input was handled.
         if let Some(reschedule_autoshift) = autoshift_sentinel {
             if reschedule_autoshift {
-                // Reschedule autonomous movement.
+                // Handle the case where we need to ensure the new auto-shift happens before lock. 
+                if config.ensure_shift_delay_lt_lock_delay
+                    && !updated_is_airborne
+                    && next_autoshift_time > updated_fall_or_lock_time
+                {
+                    break 'exp Some(updated_fall_or_lock_time);
+                }
+                // Reschedule autonomous movement (normally).
                 break 'exp Some(next_autoshift_time);
             }
 
@@ -889,8 +894,11 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
             }
         }
 
-        // TODO
-        // If piece had an automatic move scheduled and now landed and is about to lock and it would lock *before* the autoshift triggers, ensure the shift is truncated to be faster.
+        // If piece had an automatic move scheduled,
+        // and now landed
+        // and is trying to auto-shift
+        // and is about to lock and it would lock *before* the autoshift triggers;
+        // Then ensure the shift is truncated to be faster.
         if config.ensure_shift_delay_lt_lock_delay
             && previous_is_airborne
             && !updated_is_airborne

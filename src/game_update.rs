@@ -759,8 +759,9 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     let updated_piece = updated_piece;
 
     // Update `lowest_y`, re-set `lock_time_cap` if applicable.
-    let (updated_lowest_y, updated_lock_cap_time) = if updated_piece.position.1 < previous_lowest_y
-    {
+    let (updated_lowest_y, updated_lock_cap_time) = if matches!(input, I::Activate(B::DropHard)) {
+        (previous_lowest_y.min(updated_piece.position.1), input_time)
+    } else if updated_piece.position.1 < previous_lowest_y {
         // Refresh position and lock_time_cap.
         (
             updated_piece.position.1,
@@ -838,6 +839,11 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     // Update movetimer and rest of movement stuff.
     // See also (³).
     let updated_autoshift_scheduled = 'exp: {
+        // After a hard drop, we want to lock immediately and cancel any auto-shifts.
+        if matches!(input, I::Activate(B::DropHard)) {
+            break 'exp None;
+        }
+
         let Some((is_shifting_left, dir_active_since, is_teleport)) =
             calc_isleftshift_activesince_isteleport(updated_active_buttons)
         else {

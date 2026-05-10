@@ -120,9 +120,9 @@ pub mod tetromino_generation;
 
 pub use core::{
     Board, Button, ButtonsState, CoordAdd, Coordinate, DelayCurve, DelayParameters, DelayTable,
-    GameEndCause, GameLimits, GameRng, HEIGHT, InGameTime, Input, LOCK_OUT_HEIGHT, Line,
-    Notification, NotificationFeed, Offset, Orientation, Piece, SoftDropRate, Stat, Tetromino,
-    TileID, UpdateGameError, WIDTH,
+    GameEndCause, GameLimits, GameRng, InGameTime, Input, LOCK_OUT_HEIGHT, Line, Notification,
+    NotificationFeed, Offset, Orientation, Piece, SoftDropRate, Stat, Tetromino, UpdateGameError,
+    WIDTH,
 };
 pub use game_building::GameBuilder;
 pub use game_modding::GameModifier;

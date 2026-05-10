@@ -22,7 +22,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     terminal::enable_raw_mode()?;
     let game_start = Instant::now();
-    let mut board_state = game.state().board;
+    let mut board_state = game.state().board.clone();
+    board_state.resize(20, Default::default());
 
     // Main game loop.
     'game_loop: while !game.has_ended() {
@@ -69,16 +70,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Calculate board state to show.
-        let mut new_board_state = game.state().board;
+        let mut new_board_state = game.state().board.clone();
+        new_board_state.resize(20, Default::default());
         if let Some(piece) = game.phase().piece() {
-            for ((x, y), tile_id) in piece.tiles() {
-                new_board_state[y as usize][x as usize] = Some(tile_id);
+            for (x, y) in piece.coords() {
+                new_board_state[y as usize].0[x as usize] = Some(piece.tetromino.into());
             }
         }
 
         // Redraw board only if necessary - This simple optimization avoids having to access the terminal if we don't need to.
         if new_board_state != board_state {
-            for (y, line) in new_board_state.iter().take(20).rev().enumerate() {
+            for (y, (line, _)) in new_board_state.iter().take(20).rev().enumerate() {
                 for (x, tile) in line.iter().enumerate() {
                     let tile_str = if tile.is_some() { "[]" } else { " ." };
                     std::io::stdout()

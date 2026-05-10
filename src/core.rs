@@ -5,23 +5,22 @@ use super::*;
 use either::Either;
 use rand_chacha::ChaCha8Rng;
 
-use std::{collections::VecDeque, fmt, num::NonZeroU8, ops, time::Duration};
+use std::{collections::VecDeque, fmt, ops, time::Duration};
 
-/// The maximum height *any* piece tile could reach *before* `GameOver::LockOut` occurs.
-pub const HEIGHT: usize = 32;
 /// The game field width.
 pub const WIDTH: usize = 10;
 /// The height of the (conventionally) visible playing grid that can be played in.
 /// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameEndCause::LockOut`]), although it may do so partially.
 pub const LOCK_OUT_HEIGHT: usize = 20;
+// /// The height that is allowed to be stored by the game.
+// pub const BUFFER_HEIGHT: usize = 42;
 
-/// Abstract identifier for which type of tile occupies a cell in the grid.
-pub type TileID = NonZeroU8;
 /// The type of horizontal lines of the playing grid.
-pub type Line = [Option<TileID>; WIDTH];
+pub type Line = [Option<TileType>; WIDTH];
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 /// The type of the entire two-dimensional playing grid.
-pub type Board = [Line; HEIGHT];
+/// The boolean tells us whether the line is considered 'frozen' (not cleared automatically.)
+pub type Board = Vec<(Line, bool)>;
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
 pub type Coordinate = (isize, isize);
 /// Coordinate offsets that can be [`CoordAdd::add`]ed to [`Coordinate`]s.
@@ -83,6 +82,14 @@ pub enum Tetromino {
     ///
     /// 'J' has 360° rotational symmetry + 0 axes of mirror symmetry.
     J = 6,
+}
+
+// TODO: Remove this and generalize Board/Line instead.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TileType {
+    NoTy,
+    Tet(Tetromino),
 }
 
 /// Represents the orientation an active piece can be in.
@@ -272,10 +279,7 @@ pub enum GameEndCause {
 
     // 'Buffer out' denotes a number of new lines being unable to enter the existing board.
     /// This is currently unused in the base engine.
-    BufferOut {
-        /// The lines that got pushed out and did not fit on the board anymore.
-        overflowing_lines: Vec<Line>,
-    },
+    BufferOut,
 
     /// Game over by having reached a [`Stat`] limit.
     Limit(Stat),
@@ -316,7 +320,7 @@ pub enum Notification {
     /// The duration indicates the line clear delay the game was configured with at the time.
     LinesClearing {
         /// A list of height coordinates/indices and the lines themselves that were cleared.
-        lines: Vec<(usize, [TileID; WIDTH])>,
+        lines: Vec<(usize, [TileType; WIDTH])>,
         /// Game time where lines started clearing.
         /// Starts simultaneously to when a piece was locked and successfully completed some horizontal [`Line`]s,
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].
@@ -714,22 +718,6 @@ impl Tetromino {
             position: (((WIDTH - tet_width) / 2) as isize, LOCK_OUT_HEIGHT as isize),
         }
     }
-
-    /// Returns the convened-on standard tile id corresponding to the given tetromino.
-    pub const fn tile_id(self) -> TileID {
-        use Tetromino::*;
-        let u8 = match self {
-            O => 1,
-            I => 2,
-            S => 3,
-            Z => 4,
-            T => 5,
-            L => 6,
-            J => 7,
-        };
-        // SAFETY: Ye, `u8 > 0`;
-        unsafe { NonZeroU8::new_unchecked(u8) }
-    }
 }
 
 impl Orientation {
@@ -751,26 +739,26 @@ impl Orientation {
 
 impl Piece {
     /// Returns the coordinates and tile types for he piece on the board.
-    pub fn tiles(&self) -> [(Coordinate, TileID); 4] {
+    pub fn coords(&self) -> [Coordinate; 4] {
         let Self {
             tetromino,
             orientation,
             position: (x, y),
         } = self;
-        let tile_id = tetromino.tile_id();
         tetromino
             .minos(*orientation)
-            .map(|(dx, dy)| ((x + dx, y + dy), tile_id))
+            .map(|(dx, dy)| (x + dx, y + dy))
     }
 
     /// Checks whether the piece fits at its current location onto the board.
     pub fn fits_on(&self, board: &Board) -> bool {
-        self.tiles().iter().all(|&((x, y), _)| {
+        self.coords().iter().all(|&(x, y)| {
             0 <= x
                 && (x as usize) < WIDTH
                 && 0 <= y
-                && (y as usize) < HEIGHT
-                && board[y as usize][x as usize].is_none()
+                && board
+                    .get(y as usize)
+                    .is_none_or(|(line, _is_frozen)| line[x as usize].is_none())
         })
     }
 
@@ -857,6 +845,12 @@ impl Piece {
         }
 
         updated_piece
+    }
+}
+
+impl From<Tetromino> for TileType {
+    fn from(value: Tetromino) -> Self {
+        TileType::Tet(value)
     }
 }
 

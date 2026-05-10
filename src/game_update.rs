@@ -1187,9 +1187,9 @@ fn do_lock<TetGen, PceRot>(
     let is_spin = piece.offset_on(&state.board, (0, 1)).is_err();
 
     let any_below_skyline = piece
-        .tiles()
+        .coords()
         .iter()
-        .any(|&((_, y), _)| (y as usize) < LOCK_OUT_HEIGHT);
+        .any(|&(_, y)| (y as usize) < LOCK_OUT_HEIGHT);
 
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
     if !any_below_skyline {
@@ -1202,10 +1202,14 @@ fn do_lock<TetGen, PceRot>(
     }
 
     // Locking.
-    for ((x, y), tile_id) in piece.tiles() {
-        // Put tile into board.
-        if (0..WIDTH).contains(&(x as usize)) && (0..HEIGHT).contains(&(y as usize)) {
-            state.board[y as usize][x as usize] = Some(tile_id);
+    for (x, y) in piece.coords() {
+        if (0..WIDTH).contains(&(x as usize)) {
+            // Ensure line exists.
+            if y as usize >= state.board.len() {
+                state.board.resize((y + 1) as usize, Default::default());
+            }
+            // Put tile onto board.
+            state.board[y as usize].0[x as usize] = Some(piece.tetromino.into());
         }
     }
 
@@ -1225,9 +1229,10 @@ fn do_lock<TetGen, PceRot>(
 
     // Find lines which might get cleared by piece locking. (actual clearing done later).
     let mut cleared_lines = Vec::new();
-    for y in (0..HEIGHT).rev() {
-        if !state.board[y].contains(&None) {
-            cleared_lines.push((y, state.board[y].map(Option::unwrap)));
+    for (y, (line, is_frozen)) in state.board.iter().enumerate() {
+        // Line will be cleared if it isn't frozen and contains no empty tiles anymore.
+        if !is_frozen && !line.contains(&None) {
+            cleared_lines.push((y, line.map(Option::unwrap)));
         }
     }
 
@@ -1251,7 +1256,7 @@ fn do_lock<TetGen, PceRot>(
 
     let combo = state.consecutive_lineclears;
 
-    let is_perfect = state.board.iter().all(|line| {
+    let is_perfect = state.board.iter().all(|(line, _is_frozen)| {
         line.iter().all(|tile| tile.is_none()) || line.iter().all(|tile| tile.is_some())
     });
 
@@ -1298,12 +1303,13 @@ fn do_lines_clearing<TetGen, PceRot>(
     state: &mut State<TetGen>,
     clear_finish_time: InGameTime,
 ) -> Phase {
-    for y in (0..HEIGHT).rev() {
+    // To delete all lines in one pass, iterate through all height indices from top to bottom.
+    for y in (0..state.board.len()).rev() {
+        let (line, is_frozen) = &mut state.board[y];
         // Full line: move it to the cleared lines storage and push an empty line to the board.
-        if state.board[y].iter().all(|tile| tile.is_some()) {
-            // We 'default out' the offending line, then move down all others.
-            state.board[y] = Line::default();
-            state.board[y..].rotate_left(1);
+        if !*is_frozen && line.iter().all(|tile| tile.is_some()) {
+            // We remove the line.
+            state.board.remove(y);
 
             state.lineclears += 1;
 

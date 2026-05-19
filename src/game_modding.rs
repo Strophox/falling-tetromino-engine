@@ -2,17 +2,17 @@
 Modding facilities for the engine.
 */
 
-use crate::core::{Configuration, Game, Phase, State, StateInitialization};
-
-use super::*;
+use crate::core::{
+    Configuration, Game, InGameTime, Input, NotificationFeed, Phase, State, StateInitialization,
+};
 
 /// Helper struct to enable [`GameModifier`]s to access to the game's internals.
 #[derive(PartialEq, Eq, Debug)]
 #[allow(unused, missing_docs)]
-pub struct GameAccess<'a, TetGen = StdTetGen, PceRot = StdPceRot> {
+pub struct GameAccess<'a, TetGen, PceRot, TileData> {
     pub config: &'a mut Configuration<PceRot>,
     pub state_init: &'a StateInitialization<TetGen>,
-    pub state: &'a mut State<TetGen>,
+    pub state: &'a mut State<TetGen, TileData>,
     pub phase: &'a mut Phase,
 }
 
@@ -39,8 +39,8 @@ pub(crate) enum Hook<'a> {
     LinesClearPost,
 }
 
-impl<TetGen, PceRot> Game<TetGen, PceRot> {
-    pub(crate) fn run_mods(&mut self, mut hook_point: Hook, feed: &mut NotificationFeed) {
+impl<TetGen, PceRot, TileData> Game<TetGen, PceRot, TileData> {
+    pub(crate) fn run_mods(&mut self, mut hook_point: Hook, feed: &mut NotificationFeed<TileData>) {
         for modifier in &mut self.modifiers {
             let modify = modifier.as_mut();
             let game = GameAccess {
@@ -104,7 +104,7 @@ impl<TetGen, PceRot> Game<TetGen, PceRot> {
 ///     (e.g. the tetromino type is converted to `Tetromino::I` after 1s of `Piece` spawn.)
 ///   - **Not** O.k.: Keep track of the frontend's approximate framerate (by counting number of time update calls)
 ///     and turn the active piece into `Tetromino::O` for certain values.
-pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug {
+pub trait GameModifier<TetGen, PceRot, TileData>: std::fmt::Debug {
     /// Convention to identify a mod by name.
     // FIXME: This could be -> Cow<String, 'a> or a type determined by user.
     fn id(&self) -> String;
@@ -141,78 +141,88 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
 
     /// This method allows a modifier to provide access to internal state the modifier would like to display.
     // FIXME: This could be more general (e.g. key-value store-like type) or a type determined by user.
-    fn stats(&self) -> &[String];
+    fn values(&self) -> &[(String, String)];
 
     /// Try to clone the modifier if possible.
     /// Otherwise return an error.
-    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen, PceRot>>, String>;
+    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen, PceRot, TileData>>, String>;
 
     /// This function gets called anytime [`Game::update`] is called with `Some` actual [`Input`].
     ///
     /// Note that the `&mut Option<Input>` allows this call to [`Option::take`] the input and nullify it.
     fn on_receive_player_input(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
         _player_input: &mut Option<Input>,
     ) {
     }
 
     /// This function gets called once, when the game has finished getting constructed by `GameBuilder`.
-    fn on_game_built(&mut self, _game: GameAccess<TetGen, PceRot>) {}
+    fn on_game_built(&mut self, _game: GameAccess<TetGen, PceRot, TileData>) {}
 
     /// This function gets called once, when the game has entered [`Phase::GameEnd`].
-    fn on_game_end(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
+    fn on_game_end(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
+    ) {
+    }
 
     /// This function gets called anytime and immediately before any step inside the engine is applied which will update the game state in a way where time is moved forward.
     fn on_progress_time_state_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called anytime and immediately after any step inside the engine is applied which will update the game state in a way where time has been moved forward.
     fn on_progress_time_state_post(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
     ) {
     }
 
     /// This function gets called immediately bfore the engine checks all its limiting stats and possibly ends.
     fn on_check_game_limits_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
     ) {
     }
 
     /// This function gets called immediately after the engine has checked all its limiting stats and possibly ended.
     fn on_check_game_limits_post(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
     ) {
     }
 
     /// This function gets called immediately before [`Phase::Spawning`] is handled.
     fn on_spawn_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after [`Phase::Spawning`] has been handled.
-    fn on_spawn_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
+    fn on_spawn_post(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
+    ) {
+    }
 
     /// This function gets called immediately before a player action in [`Phase::PieceInPlay`] is handled.
     fn on_player_action_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _input: Input,
         _time: &mut InGameTime,
     ) {
@@ -220,8 +230,8 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
     /// This function gets called immediately after a player action in [`Phase::PieceInPlay`] has been handled.
     fn on_player_action_post(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _input: Input,
     ) {
     }
@@ -229,260 +239,64 @@ pub trait GameModifier<TetGen = StdTetGen, PceRot = StdPceRot>: std::fmt::Debug 
     /// This function gets called immediately before an autonomous move of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_autoshift_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after an autonomous move of the piece in [`Phase::PieceInPlay`] has been handled.
     fn on_autoshift_post(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
     ) {
     }
 
     /// This function gets called immediately before falling of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_fall_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after falling of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_fall_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
+    fn on_fall_post(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
+    ) {
+    }
 
     /// This function gets called immediately before locking of the piece in [`Phase::PieceInPlay`] is handled.
     fn on_lock_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after locking of the piece in [`Phase::PieceInPlay`] has been handled.
-    fn on_lock_post(&mut self, _game: GameAccess<TetGen, PceRot>, _feed: &mut NotificationFeed) {}
+    fn on_lock_post(
+        &mut self,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
+    ) {
+    }
 
     /// This function gets called immediately before [`Phase::ClearingLines`] is handled.
     fn on_lines_clear_pre(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
         _time: &mut InGameTime,
     ) {
     }
     /// This function gets called immediately after [`Phase::ClearingLines`] has been handled.
     fn on_lines_clear_post(
         &mut self,
-        _game: GameAccess<TetGen, PceRot>,
-        _feed: &mut NotificationFeed,
+        _game: GameAccess<TetGen, PceRot, TileData>,
+        _feed: &mut NotificationFeed<TileData>,
     ) {
-    }
-}
-
-/// A debug modifier implementation.
-#[derive(Debug)]
-pub struct DebugMod;
-
-impl<TetGen, PceRot> GameModifier<TetGen, PceRot> for DebugMod {
-    fn id(&self) -> String {
-        stringify!(DebugMod).to_owned()
-    }
-
-    fn cfg(&self) -> String {
-        "".to_owned()
-    }
-
-    fn stats(&self) -> &[String] {
-        &[]
-    }
-
-    fn try_clone(&self) -> Result<Box<dyn GameModifier<TetGen, PceRot>>, String> {
-        Ok(Box::new(DebugMod))
-    }
-
-    fn on_receive_player_input(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-        _player_input: &mut Option<Input>,
-    ) {
-        feed.push((
-            Notification::Custom("on_receive_player_input".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_game_built(&mut self, _game: GameAccess<TetGen, PceRot>) {}
-
-    fn on_game_end(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
-        feed.push((
-            Notification::Custom("on_game_end".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_progress_time_state_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_progress_time_state_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_progress_time_state_post(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-    ) {
-        feed.push((
-            Notification::Custom("on_progress_time_state_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_check_game_limits_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-    ) {
-        feed.push((
-            Notification::Custom("on_check_game_limits_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_check_game_limits_post(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-    ) {
-        feed.push((
-            Notification::Custom("on_check_game_limits_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_spawn_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_spawn_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_spawn_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
-        feed.push((
-            Notification::Custom("on_spawn_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_player_action_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _input: Input,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_player_action_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_player_action_post(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _input: Input,
-    ) {
-        feed.push((
-            Notification::Custom("on_player_action_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_autoshift_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_autoshift_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_autoshift_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
-        feed.push((
-            Notification::Custom("on_autoshift_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_fall_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_fall_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_fall_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
-        feed.push((
-            Notification::Custom("on_fall_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_lock_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_lock_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_lock_post(&mut self, game: GameAccess<TetGen, PceRot>, feed: &mut NotificationFeed) {
-        feed.push((
-            Notification::Custom("on_lock_post".to_owned()),
-            game.state.time,
-        ));
-    }
-
-    fn on_lines_clear_pre(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-        _time: &mut InGameTime,
-    ) {
-        feed.push((
-            Notification::Custom("on_lines_clear_pre".to_owned()),
-            game.state.time,
-        ));
-    }
-    fn on_lines_clear_post(
-        &mut self,
-        game: GameAccess<TetGen, PceRot>,
-        feed: &mut NotificationFeed,
-    ) {
-        feed.push((
-            Notification::Custom("on_lines_clear_post".to_owned()),
-            game.state.time,
-        ));
     }
 }

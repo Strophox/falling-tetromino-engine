@@ -1,26 +1,30 @@
 /*! The core [`Game`] type and types for its fields. */
 
-use super::*;
-
 use either::Either;
 use rand_chacha::ChaCha8Rng;
 
 use std::{collections::VecDeque, fmt, ops, time::Duration};
 
+use crate::{
+    game_building::GameBuilder,
+    game_modding::GameModifier,
+    helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64},
+};
+
 /// The game field width.
-pub const WIDTH: usize = 10;
+pub const BOARD_WIDTH: usize = 10;
 /// The height of the (conventionally) visible playing grid that can be played in.
 /// No tile piece may have all its tiles locked entirely at or above this index height (see [`GameEndCause::LockOut`]), although it may do so partially.
-pub const LOCK_OUT_HEIGHT: usize = 20;
-// /// The height that is allowed to be stored by the game.
-// pub const BUFFER_HEIGHT: usize = 42;
+pub const PLAYABLE_BOARD_HEIGHT: usize = 20;
+/// The height that is allowed to be stored by the game.
+pub const MAX_BOARD_HEIGHT: usize = 64;
 
 /// The type of horizontal lines of the playing grid.
-pub type Line = [Option<TileType>; WIDTH];
+pub type Line<TileData> = [Option<TileData>; BOARD_WIDTH];
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 /// The type of the entire two-dimensional playing grid.
 /// The boolean tells us whether the line is considered 'frozen' (not cleared automatically.)
-pub type Board = Vec<(Line, bool)>;
+pub type Board<TileData> = Vec<(Line<TileData>, bool)>;
 /// Coordinates conventionally used to index into the [`Board`], starting in the bottom left.
 pub type Coordinate = (isize, isize);
 /// Coordinate offsets that can be [`CoordAdd::add`]ed to [`Coordinate`]s.
@@ -33,12 +37,12 @@ pub type ButtonsState = [Option<InGameTime>; Button::VARIANTS.len()];
 pub type InGameTime = Duration;
 /// The internal RNG used by a game.
 pub type GameRng = ChaCha8Rng;
-/// The type used to store fall or luck curves.
+/// The type used to store a soft drop factor or lowerbound.
 pub type SoftDropRate = Either<ExtNonNegF64, ExtDuration>;
-/// The type used to store fall or luck curves.
+/// The type used to store fall or lock curves.
 pub type DelayCurve = Either<DelayParameters, DelayTable>;
 /// Type alias for a stream of notifications with timestamps.
-pub type NotificationFeed = Vec<(Notification, InGameTime)>;
+pub type NotificationFeed<TileData = Tetromino> = Vec<(Notification<TileData>, InGameTime)>;
 
 /// Represents one of the seven "Tetrominos";
 ///
@@ -82,14 +86,6 @@ pub enum Tetromino {
     ///
     /// 'J' has 360° rotational symmetry + 0 axes of mirror symmetry.
     J = 6,
-}
-
-// TODO: Remove this and generalize Board/Line instead.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TileType {
-    NoTy,
-    Tet(Tetromino),
 }
 
 /// Represents the orientation an active piece can be in.
@@ -300,7 +296,7 @@ pub enum GameEndCause {
 /// These can be used to more easily render visual feedback to the player.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Notification {
+pub enum Notification<TileData> {
     /// A piece was quickly dropped from its original position to a new one.
     HardDrop {
         /// Information about the old state of the hard-dropped piece.
@@ -320,7 +316,7 @@ pub enum Notification {
     /// The duration indicates the line clear delay the game was configured with at the time.
     LinesClearing {
         /// A list of height coordinates/indices and the lines themselves that were cleared.
-        lines: Vec<(usize, [TileType; WIDTH])>,
+        lines: Vec<(usize, [TileData; BOARD_WIDTH])>,
         /// Game time where lines started clearing.
         /// Starts simultaneously to when a piece was locked and successfully completed some horizontal [`Line`]s,
         /// therefore this will coincide with the time same value in a nearby [`Notification::PieceLocked`].
@@ -370,12 +366,12 @@ pub enum UpdateGameError {
 }
 
 /// Trait to enable adding 2D coordinates together.
-pub trait CoordAdd {
+pub trait CoordExt {
     /// Adds an offset to a coordinate, wrapping on overflow.
     fn add(self, offset: Offset) -> Coordinate;
 }
 
-impl CoordAdd for Coordinate {
+impl CoordExt for Coordinate {
     fn add(self, (dx, dy): Offset) -> Coordinate {
         let (x, y) = self;
         (x.wrapping_add(dx), y.wrapping_add(dy))
@@ -405,7 +401,7 @@ mod tests {
 /// or supply the information manually / externally.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Configuration<PceRot = StdPceRot> {
+pub struct Configuration<PceRot> {
     /// How many pieces should be pre-generated and accessible/visible in the game state.
     #[cfg_attr(feature = "serde", serde(rename = "preview"))]
     pub generate_piece_preview: usize,
@@ -455,11 +451,14 @@ pub struct Configuration<PceRot = StdPceRot> {
     #[cfg_attr(feature = "serde", serde(rename = "lock_curve"))]
     pub lock_delay_curve: Option<DelayCurve>,
 
-    /// Whether engine should try to ensure that delays for autonomous moves - which are determined by
-    /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
-    /// This allows DAS and ARR to function at extreme game speeds.
-    #[cfg_attr(feature = "serde", serde(rename = "sltl"))]
-    pub ensure_shift_delay_lt_lock_delay: bool,
+    /// Whether engine should ensure that auto-shifts happen before locking.
+    /// In particular:
+    /// - `delayed_auto_shift` and `auto_repeat_rate` are shortened to be equal to `lock_delay`,
+    /// - and auto-shifts are updated to happen before lock runs out in case the piece newly hit the ground or changed direction while on the ground.
+    ///
+    /// This allows auto-shifting to continue working at extreme game speeds (0s fall delay and lock delay shorter than DAS/ARR).
+    #[cfg_attr(feature = "serde", serde(rename = "sbl"))]
+    pub ensure_autoshift_before_lock: bool,
 
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.
     /// Normally, lock delay only resets if rotation or movement actually succeeds.
@@ -510,8 +509,8 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
             lock_delay_curve: Some(Either::Left(DelayParameters::constant(
                 Duration::from_millis(500).into(),
             ))),
+            ensure_autoshift_before_lock: true,
             allow_lenient_lock_reset: false,
-            ensure_shift_delay_lt_lock_delay: true,
             lock_reset_cap_factor: ExtNonNegF64::new(8.0).unwrap(),
             line_clear_duration: Duration::from_millis(200),
             update_delays_every_n_lineclears: 10,
@@ -530,7 +529,7 @@ impl<PceRot: Default> Default for Configuration<PceRot> {
 /// This struct is used for game reproducibility.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct StateInitialization<TetGen = StdTetGen> {
+pub struct StateInitialization<TetGen> {
     /// The value to seed the game's PRNG with.
     #[cfg_attr(feature = "serde", serde(rename = "seed"))]
     pub seed: u64,
@@ -547,7 +546,7 @@ pub struct StateInitialization<TetGen = StdTetGen> {
 /// * It is mutated by the `Game` itself.
 #[derive(Eq, PartialEq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct State<TetGen = StdTetGen> {
+pub struct State<TetGen, TileData> {
     /// Current in-game time.
     pub time: InGameTime,
     /// The stores which buttons are considered active and since when.
@@ -561,7 +560,7 @@ pub struct State<TetGen = StdTetGen> {
     /// Data about the piece being held. `true` denotes that the held piece can be swapped back in.
     pub tetromino_held: Option<(Tetromino, bool)>,
     /// The main playing grid storing empty (`None`) and filled, fixed tiles (`Some(nz_u32)`).
-    pub board: Board,
+    pub board: Board<TileData>,
     /// The current duration a piece takes to fall one unit.
     pub fall_delay: ExtDuration,
     /// The point (number of lines cleared) at which fall delay was updated to zero (possibly capped if formula yielded negative).
@@ -629,7 +628,7 @@ pub enum Phase {
 
 /// Main game struct representing a round of play.
 #[derive(Debug)]
-pub struct Game<TetGen = StdTetGen, PceRot = StdPceRot> {
+pub struct Game<TetGen, PceRot, TileData> {
     /// Some internal configuration options of the `Game`.
     ///
     /// # Reproducibility
@@ -640,7 +639,7 @@ pub struct Game<TetGen = StdTetGen, PceRot = StdPceRot> {
 
     pub(crate) state_init: StateInitialization<TetGen>,
 
-    pub(crate) state: State<TetGen>,
+    pub(crate) state: State<TetGen, TileData>,
 
     pub(crate) phase: Phase,
 
@@ -650,7 +649,7 @@ pub struct Game<TetGen = StdTetGen, PceRot = StdPceRot> {
     /// The game does not detect changes to its modifiers.
     /// It is therefore the user's responsibility to either not change modifiers after the game has started,
     /// or supply the information manually / externally.
-    pub modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot>>>,
+    pub modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot, TileData>>>,
 }
 
 impl Tetromino {
@@ -715,7 +714,10 @@ impl Tetromino {
         Piece {
             tetromino: self,
             orientation: Orientation::N,
-            position: (((WIDTH - tet_width) / 2) as isize, LOCK_OUT_HEIGHT as isize),
+            position: (
+                ((BOARD_WIDTH - tet_width) / 2) as isize,
+                PLAYABLE_BOARD_HEIGHT as isize,
+            ),
         }
     }
 }
@@ -731,7 +733,7 @@ impl Orientation {
 
     /// Find a new direction by turning right some number of times.
     ///
-    /// This accepts `i32` to allow for left rotation.
+    /// This accepts `i8` to allow for left rotation.
     pub const fn turn_right(self, turns: i8) -> Self {
         Orientation::VARIANTS[((self as i8 + turns) as usize).rem_euclid(4)]
     }
@@ -751,10 +753,10 @@ impl Piece {
     }
 
     /// Checks whether the piece fits at its current location onto the board.
-    pub fn fits_on(&self, board: &Board) -> bool {
+    pub fn fits_on<TileData>(&self, board: &Board<TileData>) -> bool {
         self.coords().iter().all(|&(x, y)| {
             0 <= x
-                && (x as usize) < WIDTH
+                && (x as usize) < BOARD_WIDTH
                 && 0 <= y
                 && board
                     .get(y as usize)
@@ -771,7 +773,11 @@ impl Piece {
     }
 
     /// Check whether the piece fits a given offset from its current location onto the board.
-    pub fn offset_on(&self, board: &Board, offset: Offset) -> Result<Piece, Piece> {
+    pub fn offset_on<TileData>(
+        &self,
+        board: &Board<TileData>,
+        offset: Offset,
+    ) -> Result<Piece, Piece> {
         let offset_piece = self.offset(offset);
 
         if offset_piece.fits_on(board) {
@@ -782,15 +788,15 @@ impl Piece {
     }
 
     /// Check whether piece could fall one unit down or not.
-    pub fn is_airborne(&self, board: &Board) -> bool {
+    pub fn is_airborne<TileData>(&self, board: &Board<TileData>) -> bool {
         self.offset_on(board, (0, -1)).is_ok()
     }
 
     /// Check whether the piece fits a given offset from its current location onto the board, with
     /// its rotation changed by some number of right turns.
-    pub fn reoriented_offset_on(
+    pub fn reoriented_offset_on<TileData>(
         &self,
-        board: &Board,
+        board: &Board<TileData>,
         right_turns: i8,
         offset: Offset,
     ) -> Result<Piece, Piece> {
@@ -809,9 +815,9 @@ impl Piece {
 
     /// Given an iterator over some offsets, check whether the rotated piece fits at any offset
     /// location onto the board.
-    pub fn find_reoriented_offset_on(
+    pub fn find_reoriented_offset_on<TileData>(
         &self,
-        board: &Board,
+        board: &Board<TileData>,
         right_turns: i8,
         offsets: impl IntoIterator<Item = Offset>,
     ) -> Option<Piece> {
@@ -830,8 +836,8 @@ impl Piece {
     }
 
     /// Return the position the piece would hit if it kept moving at `offset` steps.
-    /// For offset `(0,0)` this function return immediately.
-    pub fn teleported(&self, board: &Board, offset: Offset) -> Piece {
+    /// For offset `(0,0)` this function returns immediately.
+    pub fn teleported<TileData>(&self, board: &Board<TileData>, offset: Offset) -> Piece {
         let mut updated_piece = *self;
 
         if offset != (0, 0) {
@@ -848,18 +854,12 @@ impl Piece {
     }
 }
 
-impl From<Tetromino> for TileType {
-    fn from(value: Tetromino) -> Self {
-        TileType::Tet(value)
-    }
-}
-
 impl std::fmt::Display for GameEndCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            GameEndCause::LockOut { .. } => "Lock out",
-            GameEndCause::BlockOut { .. } => "Block out",
-            GameEndCause::BufferOut { .. } => "Buffer out",
+            GameEndCause::LockOut { .. } => "Lock-out",
+            GameEndCause::BlockOut { .. } => "Block-out",
+            GameEndCause::BufferOut => "Buffer-out",
             GameEndCause::Limit(stat) => match stat {
                 Stat::TimeElapsed(_) => "Time limit reached",
                 Stat::PiecesLocked(_) => "Piece limit reached",
@@ -1001,6 +1001,7 @@ impl DelayParameters {
     }
 
     /// Calculates an actual delay value given a number of lineclears to determine progression.
+    /// The boolean signifies whether the bound was hit and the delay is stuck / won't change.
     pub fn calculate_and_check(&self, lineclears: u32) -> (ExtDuration, bool) {
         // Multiplicative factor computed from lineclears;
         let raw_mul = self.factor.get().powf(f64::from(lineclears));
@@ -1043,6 +1044,7 @@ impl DelayTable {
     }
 
     /// Looks up a delay entry given a number of lineclears to determine progress.
+    /// The boolean signifies whether the bound was hit and the delay is stuck / won't change.
     pub fn lookup_and_check(
         &self,
         lineclears: u32,
@@ -1175,19 +1177,21 @@ impl Phase {
     }
 }
 
-impl<TetGen, PceRot> Game<TetGen, PceRot> {
+impl<TetGen, PceRot: Default, TileData> Game<TetGen, PceRot, TileData> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
-    pub fn builder() -> GameBuilder<TetGen> {
-        GameBuilder::default()
+    pub fn builder() -> GameBuilder<TetGen, PceRot, TileData> {
+        GameBuilder::new()
     }
+}
 
+impl<TetGen, PceRot, TileData> Game<TetGen, PceRot, TileData> {
     /// Read accessor for the game's initial values.
     pub const fn state_init(&self) -> &StateInitialization<TetGen> {
         &self.state_init
     }
 
     /// Read accessor for the current game state.
-    pub const fn state(&self) -> &State<TetGen> {
+    pub const fn state(&self) -> &State<TetGen, TileData> {
         &self.state
     }
 
@@ -1212,7 +1216,7 @@ impl<TetGen, PceRot> Game<TetGen, PceRot> {
     }
 }
 
-impl<TetGen: Clone, PceRot: Clone> Game<TetGen, PceRot> {
+impl<TetGen: Clone, PceRot: Clone, TileData: Clone> Game<TetGen, PceRot, TileData> {
     /// Try to create a cloned instance of the game.
     pub fn try_clone(&self) -> Result<Self, String> {
         let mut modifiers = Vec::new();

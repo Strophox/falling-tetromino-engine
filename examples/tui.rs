@@ -9,12 +9,14 @@ use crossterm::{
     style::Print,
     terminal,
 };
-use falling_tetromino_engine::{Button, Game, GameLimits, Input, Phase, Stat, UpdateGameError};
+use falling_tetromino_engine::{
+    Button, Game, GameLimits, Input, PLAYABLE_BOARD_HEIGHT, Phase, Stat, UpdateGameError,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize game. In-game time starts at 0s.
-    let mut game = Game::builder()
-        .seed(1234)
+    let mut game: Game = Game::builder()
+        .seed(4321)
         .game_limits(GameLimits::single(Stat::LinesCleared(40), true))
         .build();
 
@@ -23,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal::enable_raw_mode()?;
     let game_start = Instant::now();
     let mut board_state = game.state().board.clone();
-    board_state.resize(20, Default::default());
+    board_state.resize(PLAYABLE_BOARD_HEIGHT, Default::default());
 
     // Main game loop.
     'game_loop: while !game.has_ended() {
@@ -71,10 +73,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Calculate board state to show.
         let mut new_board_state = game.state().board.clone();
-        new_board_state.resize(20, Default::default());
+        new_board_state.resize(PLAYABLE_BOARD_HEIGHT, Default::default());
         if let Some(piece) = game.phase().piece() {
             for (x, y) in piece.coords() {
-                new_board_state[y as usize].0[x as usize] = Some(piece.tetromino.into());
+                if (y as usize) < PLAYABLE_BOARD_HEIGHT {
+                    new_board_state[y as usize].0[x as usize] = Some(piece.tetromino.into());
+                }
             }
         }
 

@@ -5,13 +5,20 @@ Handles what happens when [`Game::update`] is called.
 use either::Either;
 
 use crate::{
-    core::{Configuration, DelayCurveExt, Game, Phase, State},
+    core::{
+        BOARD_WIDTH, Board, Button, ButtonsState, Configuration, DelayCurveExt, Game, GameEndCause,
+        InGameTime, Input, Notification, NotificationFeed, PLAYABLE_BOARD_HEIGHT, Phase, Piece,
+        Stat, State, Tetromino, UpdateGameError,
+    },
     game_modding::Hook,
+    helper_types::extduration::ExtDuration,
+    piece_rotation::PieceRotator,
+    tetromino_generation::TetrominoGenerator,
 };
 
-use super::*;
-
-impl<TetGen: TetrominoGenerator, PceRot: PieceRotator> Game<TetGen, PceRot> {
+impl<TetGen: TetrominoGenerator, PceRot: PieceRotator, TileData: Clone + From<Tetromino>>
+    Game<TetGen, PceRot, TileData>
+{
     /// Retrieve the when the next *autonomous* in-game update is scheduled.
     /// I.e., compute the next time the game would change state assuming no button updates
     ///
@@ -56,7 +63,7 @@ impl<TetGen: TetrominoGenerator, PceRot: PieceRotator> Game<TetGen, PceRot> {
     ///
     /// This can be used so `game.has_ended()` returns true and prevents future
     /// calls to `update` from continuing to advance the game.
-    pub fn forfeit(&mut self) -> Result<NotificationFeed, UpdateGameError> {
+    pub fn forfeit(&mut self) -> Result<NotificationFeed<TileData>, UpdateGameError> {
         let piece_in_play = match self.phase {
             Phase::GameEnd { .. } => {
                 // Do not allow updating a game that has already ended.
@@ -108,7 +115,7 @@ impl<TetGen: TetrominoGenerator, PceRot: PieceRotator> Game<TetGen, PceRot> {
         &mut self,
         mut target_time: InGameTime,
         mut player_input: Option<Input>,
-    ) -> Result<NotificationFeed, UpdateGameError> {
+    ) -> Result<NotificationFeed<TileData>, UpdateGameError> {
         if target_time < self.state.time {
             // Do not allow updating if target time lies in the past.
             return Err(UpdateGameError::TargetTimeInPast);
@@ -332,9 +339,9 @@ impl<TetGen: TetrominoGenerator, PceRot: PieceRotator> Game<TetGen, PceRot> {
     }
 }
 
-fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
+fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     spawn_time: InGameTime,
 ) -> Phase {
     // Take a tetromino.
@@ -414,9 +421,9 @@ fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
         if tele_l != tele_r {
             // FIXME: Aw hell naw 💀 do we really need to pull in all of `itertools` just for conditionally `.rev()`ersing a range https://stackoverflow.com/questions/59467882/how-do-i-make-a-range-reverse-on-condition
             let xs: Vec<_> = if tele_l > tele_r {
-                (0..WIDTH).collect()
+                (0..BOARD_WIDTH).collect()
             } else {
-                (0..WIDTH).rev().collect()
+                (0..BOARD_WIDTH).rev().collect()
             };
 
             // Search for different position piece might fit.
@@ -490,9 +497,9 @@ fn do_spawn<TetGen: TetrominoGenerator, PceRot: PieceRotator>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_player_input<TetGen, PceRot: PieceRotator>(
+fn do_player_input<TetGen, PceRot: PieceRotator, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
     previous_fall_or_lock_time: InGameTime,
@@ -500,7 +507,7 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     previous_lowest_y: isize,
     input: Input,
     input_time: InGameTime,
-    feed: &mut NotificationFeed,
+    feed: &mut NotificationFeed<TileData>,
     updated_active_buttons: &ButtonsState,
 ) -> Phase {
     /*
@@ -864,7 +871,7 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
         if let Some(reschedule_autoshift) = autoshift_sentinel {
             if reschedule_autoshift {
                 // Handle the case where we need to ensure the new auto-shift happens before lock.
-                if config.ensure_shift_delay_lt_lock_delay
+                if config.ensure_autoshift_before_lock
                     && !updated_is_airborne
                     && next_autoshift_time > updated_fall_or_lock_time
                 {
@@ -905,7 +912,7 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
         // and is trying to auto-shift
         // and is about to lock and it would lock *before* the autoshift triggers;
         // Then ensure the shift is truncated to be faster.
-        if config.ensure_shift_delay_lt_lock_delay
+        if config.ensure_autoshift_before_lock
             && previous_is_airborne
             && !updated_is_airborne
             && let Some(previous_autoshift_time) = previous_autoshift_scheduled
@@ -930,8 +937,8 @@ fn do_player_input<TetGen, PceRot: PieceRotator>(
     }
 }
 
-fn try_do_hold<TetGen>(
-    state: &mut State<TetGen>,
+fn try_do_hold<TetGen, TileData>(
+    state: &mut State<TetGen, TileData>,
     tetromino: Tetromino,
     next_spawn_time: InGameTime,
 ) -> Option<Phase> {
@@ -960,9 +967,9 @@ fn try_do_hold<TetGen>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn do_autonomous_shift<TetGen, PceRot>(
+fn do_autonomous_shift<TetGen, PceRot, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     previous_piece: Piece,
     autoshift_time: InGameTime,
     previous_fall_or_lock_time: InGameTime,
@@ -1048,9 +1055,9 @@ fn do_autonomous_shift<TetGen, PceRot>(
     }
 }
 
-fn do_fall<TetGen, PceRot>(
+fn do_fall<TetGen, PceRot, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     previous_piece: Piece,
     previous_autoshift_scheduled: Option<InGameTime>,
     fall_time: InGameTime,
@@ -1147,7 +1154,7 @@ fn do_fall<TetGen, PceRot>(
         }
 
         // If piece had an automatic move scheduled and now landed and is about to lock and would lock *before* the autshift triggers, ensure the shift is truncated to be faster.
-        if config.ensure_shift_delay_lt_lock_delay
+        if config.ensure_autoshift_before_lock
             && previous_is_airborne
             && !updated_is_airborne
             && let Some(previous_autoshift_time) = previous_autoshift_scheduled
@@ -1171,12 +1178,12 @@ fn do_fall<TetGen, PceRot>(
     }
 }
 
-fn do_lock<TetGen, PceRot>(
+fn do_lock<TetGen, PceRot, TileData: Clone + From<Tetromino>>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     piece: Piece,
     lock_time: InGameTime,
-    feed: &mut NotificationFeed,
+    feed: &mut NotificationFeed<TileData>,
 ) -> Phase {
     // Before board is changed, precompute whether a piece was 'spun' into position;
     // - 'Spun' pieces give higher points bonus.
@@ -1189,7 +1196,7 @@ fn do_lock<TetGen, PceRot>(
     let any_below_skyline = piece
         .coords()
         .iter()
-        .any(|&(_, y)| (y as usize) < LOCK_OUT_HEIGHT);
+        .any(|&(_, y)| (y as usize) < PLAYABLE_BOARD_HEIGHT);
 
     // If all minos of the tetromino were locked entirely outside the `SKYLINE` bounding height, it's game over.
     if !any_below_skyline {
@@ -1203,7 +1210,7 @@ fn do_lock<TetGen, PceRot>(
 
     // Locking.
     for (x, y) in piece.coords() {
-        if (0..WIDTH).contains(&(x as usize)) {
+        if (0..BOARD_WIDTH).contains(&(x as usize)) {
             // Ensure line exists.
             if y as usize >= state.board.len() {
                 state.board.resize((y + 1) as usize, Default::default());
@@ -1231,8 +1238,8 @@ fn do_lock<TetGen, PceRot>(
     let mut cleared_lines = Vec::new();
     for (y, (line, is_frozen)) in state.board.iter().enumerate() {
         // Line will be cleared if it isn't frozen and contains no empty tiles anymore.
-        if !is_frozen && !line.contains(&None) {
-            cleared_lines.push((y, line.map(Option::unwrap)));
+        if !is_frozen && !line.iter().any(Option::is_none) {
+            cleared_lines.push((y, line.clone().map(Option::unwrap)));
         }
     }
 
@@ -1298,9 +1305,9 @@ fn do_lock<TetGen, PceRot>(
     }
 }
 
-fn do_lines_clearing<TetGen, PceRot>(
+fn do_lines_clearing<TetGen, PceRot, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
     clear_finish_time: InGameTime,
 ) -> Phase {
     // To delete all lines in one pass, iterate through all height indices from top to bottom.
@@ -1329,9 +1336,9 @@ fn do_lines_clearing<TetGen, PceRot>(
 }
 
 /// Update the fall and lock delay of a game [`State`] according to a given [`Configuration`] (containing delay curves for falling and locking).
-pub fn update_fall_and_lock_delays<TetGen, PceRot>(
+pub fn update_fall_and_lock_delays<TetGen, PceRot, TileData>(
     config: &Configuration<PceRot>,
-    state: &mut State<TetGen>,
+    state: &mut State<TetGen, TileData>,
 ) {
     if let Some(hit_at_n_lineclears) = state.fall_delay_lowerbound_hit_at_n_lineclears {
         // Fall delay zero was hit at some point, only possibly decrease lock delay now.
@@ -1396,10 +1403,10 @@ fn calc_updated_active_buttons(
     previous_active_buttons
 }
 
-fn check_piece_became_newly_movable(
+fn check_piece_became_newly_movable<TileData>(
     previous_piece: Piece,
     updated_piece: Piece,
-    board: &Board,
+    board: &Board<TileData>,
     dx: isize,
 ) -> bool {
     let moved_previous_piece = previous_piece.offset_on(board, (dx, 0));
@@ -1469,9 +1476,9 @@ fn calc_isleftshift_activesince_isteleport(
     }
 }
 
-fn calc_next_autoshift_time<TetGen, PceRot>(
+fn calc_next_autoshift_time<TetGen, PceRot, TileData>(
     config: &Configuration<PceRot>,
-    state: &State<TetGen>,
+    state: &State<TetGen, TileData>,
     current_time: InGameTime,
     dir_active_since: InGameTime,
     shift_is_teleport: bool,
@@ -1488,7 +1495,7 @@ fn calc_next_autoshift_time<TetGen, PceRot>(
             config.delayed_auto_shift
         };
 
-    if config.ensure_shift_delay_lt_lock_delay
+    if config.ensure_autoshift_before_lock
         && !piece_is_airborne
         && let ExtDuration::Finite(lock_delay) = state.lock_delay
         && shift_delay > lock_delay
@@ -1500,8 +1507,8 @@ fn calc_next_autoshift_time<TetGen, PceRot>(
     current_time.saturating_add(shift_delay)
 }
 
-fn calc_next_fall_time<TetGen, PceRot>(
-    state: &State<TetGen>,
+fn calc_next_fall_time<TetGen, PceRot, TileData>(
+    state: &State<TetGen, TileData>,
     config: &Configuration<PceRot>,
     current_time: InGameTime,
     active_buttons: &ButtonsState,

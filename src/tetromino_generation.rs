@@ -9,7 +9,8 @@ use rand::{
     distr::{Distribution, weighted::WeightedIndex},
 };
 
-use crate::{ExtNonNegF64, GameRng, Tetromino};
+use crate::core::{GameRng, Tetromino};
+use crate::helper_types::extnonnegf64::ExtNonNegF64;
 
 /// Handles the information of which pieces to spawn during a game.
 ///
@@ -25,7 +26,7 @@ pub trait TetrominoGenerator {
 /// Standard tetromino generator implementations.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum StdTetGen {
+pub enum MiscTetGens {
     /// Uniform random piece generator that might try to avoid repetition at least once.
     Reroll(RerollGen),
 
@@ -49,7 +50,7 @@ pub enum StdTetGen {
     Recency(RecencyGen),
 }
 
-impl StdTetGen {
+impl MiscTetGens {
     /// Initialize a uniformly random generator variant.
     pub const fn uniform() -> Self {
         Self::Reroll(RerollGen {
@@ -93,42 +94,39 @@ impl StdTetGen {
     }
 }
 
-impl Default for StdTetGen {
+impl Default for MiscTetGens {
     fn default() -> Self {
-        StdTetGen::snappy()
+        MiscTetGens::snappy()
     }
 }
 
 /// Struct produced from [`TetrominoGenerator::using_rng`] which implements [`Iterator`].
-pub struct StdUsingRng<'a> {
+pub struct MiscUsingRng<'a> {
     /// Selected tetromino generator to use as information source.
-    pub std_tet_gen: &'a mut StdTetGen,
+    pub tet_gen: &'a mut MiscTetGens,
     /// Thread random number generator for raw soure of randomness.
     pub rng: &'a mut GameRng,
 }
 
-impl TetrominoGenerator for StdTetGen {
+impl TetrominoGenerator for MiscTetGens {
     fn from_rng(_rng: &mut GameRng) -> Self {
         Self::snappy()
     }
 
     fn using_rng<'a>(&'a mut self, rng: &'a mut GameRng) -> impl Iterator<Item = Tetromino> + 'a {
-        StdUsingRng {
-            std_tet_gen: self,
-            rng,
-        }
+        MiscUsingRng { tet_gen: self, rng }
     }
 }
 
-impl<'a> Iterator for StdUsingRng<'a> {
+impl<'a> Iterator for MiscUsingRng<'a> {
     type Item = Tetromino;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.std_tet_gen {
-            StdTetGen::Reroll(reroll_gen) => reroll_gen.using_rng(self.rng).next(),
-            StdTetGen::Stock(stock_gen) => stock_gen.using_rng(self.rng).next(),
-            StdTetGen::BalanceOut(balance_out_gen) => balance_out_gen.using_rng(self.rng).next(),
-            StdTetGen::Recency(recency_gen) => recency_gen.using_rng(self.rng).next(),
+        match &mut self.tet_gen {
+            MiscTetGens::Reroll(reroll_gen) => reroll_gen.using_rng(self.rng).next(),
+            MiscTetGens::Stock(stock_gen) => stock_gen.using_rng(self.rng).next(),
+            MiscTetGens::BalanceOut(balance_out_gen) => balance_out_gen.using_rng(self.rng).next(),
+            MiscTetGens::Recency(recency_gen) => recency_gen.using_rng(self.rng).next(),
         }
     }
 }
@@ -325,7 +323,7 @@ impl TetrominoGenerator for RecencyGen {
             factor,
             is_base_not_exp,
         } = self;
-        std::iter::from_fn(|| {
+        std::iter::from_fn(move || {
             // Update all tetromino last_played values.
             for piece_last_emitted in tets_last_emitted.iter_mut() {
                 *piece_last_emitted = piece_last_emitted.saturating_add(1);

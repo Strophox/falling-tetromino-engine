@@ -10,13 +10,14 @@ use crossterm::{
     terminal,
 };
 use falling_tetromino_engine::{
-    Board, Button, GameLimits, GameRng, Input, Phase, Piece, PieceRotator, Stat, Tetromino,
-    TetrominoGenerator, UpdateGameError,
+    Button, GameLimits, GameRng, Input, PLAYABLE_BOARD_HEIGHT, Phase, Piece, PieceRotator, Stat,
+    Tetromino, TetrominoGenerator, UpdateGameError,
 };
 use rand::RngExt;
 
 // NOTE: Here we manually re-define the *core* Game type using our own custom generation and rotation types.
-type Game = falling_tetromino_engine::core::Game<UniformGenerator, LazyRotator>;
+type CustomGame =
+    falling_tetromino_engine::prelude_generic::Game<UniformGenerator, LazyRotator, TileType>;
 
 // Our custom tetromino generator.
 // It is very simple: It just picks tetrominos completely randomly*.
@@ -45,10 +46,16 @@ impl TetrominoGenerator for UniformGenerator {
 // (*Instead, it relies on how the engine stores the cell offsets of a positioned piece,
 // which is aligned to bottom left coordinate of the whole piece.
 // For example: 'I' will always pivot around its lowest leftmost cell. Try it out.)
+#[derive(Default, Clone)]
 struct LazyRotator;
 
 impl PieceRotator for LazyRotator {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &falling_tetromino_engine::prelude_generic::Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         let rotated_piece = self.free_rotate(piece, right_turns);
         rotated_piece.fits_on(board).then_some(rotated_piece)
     }
@@ -61,10 +68,24 @@ impl PieceRotator for LazyRotator {
     }
 }
 
+#[derive(PartialEq, Eq, Clone)]
+enum TileType {
+    // This variant could be used for e.g. grey tiles in special game modes etc.
+    #[allow(unused)]
+    Generic,
+    Tet(Tetromino),
+}
+
+impl From<Tetromino> for TileType {
+    fn from(value: Tetromino) -> Self {
+        TileType::Tet(value)
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize game. In-game time starts at 0s.
-    let mut game = Game::builder()
-        .seed(1234)
+    let mut game = CustomGame::builder()
+        .seed(4321)
         .game_limits(GameLimits::single(Stat::LinesCleared(40), true))
         .build();
 
@@ -72,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal::enable_raw_mode()?;
     let game_start = Instant::now();
     let mut board_state = game.state().board.clone();
-    board_state.resize(20, Default::default());
+    board_state.resize(PLAYABLE_BOARD_HEIGHT, Default::default());
 
     // Main game loop.
     'game_loop: while !game.has_ended() {
@@ -120,10 +141,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Calculate board state to show.
         let mut new_board_state = game.state().board.clone();
-        new_board_state.resize(20, Default::default());
+        new_board_state.resize(PLAYABLE_BOARD_HEIGHT, Default::default());
         if let Some(piece) = game.phase().piece() {
             for (x, y) in piece.coords() {
-                new_board_state[y as usize].0[x as usize] = Some(piece.tetromino.into());
+                if (y as usize) < PLAYABLE_BOARD_HEIGHT {
+                    new_board_state[y as usize].0[x as usize] = Some(piece.tetromino.into());
+                }
             }
         }
 

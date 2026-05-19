@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::ExtNonNegF64;
+use crate::helper_types::extnonnegf64::ExtNonNegF64;
 
 /// A [`Duration`] that may also be infinite.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]

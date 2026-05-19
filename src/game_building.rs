@@ -2,19 +2,21 @@
 Customizing, templating and constructing [`Game`]s.
  */
 
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, marker::PhantomData, time::Duration};
 
 use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::{
-    core::{Configuration, Game, Phase, SoftDropRate, State, StateInitialization},
-    game_modding::Hook,
+    core::{
+        Board, Button, Configuration, DelayCurve, Game, GameLimits, GameRng, InGameTime, Phase,
+        SoftDropRate, State, StateInitialization, Tetromino,
+    },
+    game_modding::{GameModifier, Hook},
     game_update::update_fall_and_lock_delays,
-    tetromino_generation::StdTetGen,
+    helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64},
+    tetromino_generation::TetrominoGenerator,
 };
-
-use super::*;
 
 /// This builder exposes the ability to configure a new [`Game`] to varying degrees.
 ///
@@ -27,40 +29,44 @@ use super::*;
 /// The `GameBuilder` is not used up and its configuration can be re-used to initialize more [`Game`]s.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameBuilder<TetGen = StdTetGen, PceRot = StdPceRot> {
+pub struct GameBuilder<TetGen, PceRot, TileData> {
     seed: Option<u64>,
     tetromino_generator: Option<TetGen>,
     config: Configuration<PceRot>,
+    _tile_data: PhantomData<TileData>,
 }
 
-impl<TetGen, PceRot: Default> Default for GameBuilder<TetGen, PceRot> {
+impl<TetGen, PceRot: Default, TileData> Default for GameBuilder<TetGen, PceRot, TileData> {
     fn default() -> Self {
         Self {
-            seed: Default::default(),
-            tetromino_generator: Default::default(),
+            seed: None,
+            tetromino_generator: None,
             config: Default::default(),
+            _tile_data: PhantomData,
         }
     }
 }
 
-impl<TetGen, PceRot: Default> GameBuilder<TetGen, PceRot> {
+impl<TetGen, PceRot: Default, TileData> GameBuilder<TetGen, PceRot, TileData> {
     /// Creates a blank new template representing a yet-to-be-started [`Game`] ready for configuration.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceRot> {
+impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone, TileData>
+    GameBuilder<TetGen, PceRot, TileData>
+{
     /// Creates a [`Game`] with the information specified by `self`.
-    pub fn build(&self) -> Game<TetGen, PceRot> {
+    pub fn build(&self) -> Game<TetGen, PceRot, TileData> {
         self.build_modded(Vec::new())
     }
 
     /// Creates a [`Game`] with the information specified by `self` and some one-time `modifiers`.
     pub fn build_modded(
         &self,
-        modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot>>>,
-    ) -> Game<TetGen, PceRot> {
+        modifiers: Vec<Box<dyn GameModifier<TetGen, PceRot, TileData>>>,
+    ) -> Game<TetGen, PceRot, TileData> {
         let seed = self.seed.unwrap_or_else(|| rand::rng().next_u64());
         let mut rng = GameRng::seed_from_u64(seed);
         let tetromino_generator = self
@@ -111,15 +117,18 @@ impl<TetGen: TetrominoGenerator + Clone, PceRot: Clone> GameBuilder<TetGen, PceR
 }
 
 // Getting a `GameBuilder` blueprint back from an existing `Game`.
-impl<TetGen: Clone, PceRot: Clone> Game<TetGen, PceRot> {
+impl<TetGen: Clone, PceRot: Clone, TileData> Game<TetGen, PceRot, TileData> {
     /// Creates a blueprint [`GameBuilder`] and an iterator over current modifier identifiers ([`&str`]s) from which the exact game can potentially be rebuilt.
     ///
     /// Note that the `&str`s serve the *client* to identify the modifiers and reapply them onto the `GameBuilder`, as the base engine does not know how to do so.
-    pub fn blueprint(&self) -> (GameBuilder<TetGen, PceRot>, Vec<(String, String)>) {
+    pub fn reproduce_builder(
+        &self,
+    ) -> (GameBuilder<TetGen, PceRot, TileData>, Vec<(String, String)>) {
         let builder = GameBuilder {
             seed: Some(self.state_init.seed),
             tetromino_generator: Some(self.state_init.tetromino_generator.clone()),
             config: self.config.clone(),
+            _tile_data: PhantomData,
         };
 
         let mod_ids_cfgs = self.modifiers.iter().map(|m| (m.id(), m.cfg())).collect();
@@ -129,7 +138,7 @@ impl<TetGen: Clone, PceRot: Clone> Game<TetGen, PceRot> {
 }
 
 // Gamebuilder: Setter methods.
-impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
+impl<TetGen, PceRot, TileData> GameBuilder<TetGen, PceRot, TileData> {
     /// The value to seed the game's PRNG with.
     pub fn seed(&mut self, x: u64) -> &mut Self {
         self.seed = Some(x);
@@ -207,7 +216,7 @@ impl<TetGen, PceRot> GameBuilder<TetGen, PceRot> {
     /// `delayed_auto_shift` and `auto_repeat_rate` - should be less than `lock_delay` runs out.
     /// This allows DAS and ARR to function at extreme game speeds.
     pub fn ensure_shift_delay_lt_lock_delay(&mut self, x: bool) -> &mut Self {
-        self.config.ensure_shift_delay_lt_lock_delay = x;
+        self.config.ensure_autoshift_before_lock = x;
         self
     }
     /// Whether just pressing a rotation- or movement button is enough to refresh lock delay.

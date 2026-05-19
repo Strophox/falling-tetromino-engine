@@ -110,54 +110,93 @@ Current documentation is lacking and sometimes slightly outdated. *All* features
 )]
 #![warn(missing_docs)]
 
-pub mod core;
-pub mod game_building;
-pub mod game_modding;
-pub mod game_update;
-pub mod helper_types;
-pub mod piece_rotation;
-pub mod tetromino_generation;
+mod core;
+mod game_building;
+mod game_modding;
+mod game_update;
+mod helper_types;
+mod piece_rotation;
+mod tetromino_generation;
 
-pub use core::{
-    Board, Button, ButtonsState, CoordAdd, Coordinate, DelayCurve, DelayParameters, DelayTable,
-    GameEndCause, GameLimits, GameRng, InGameTime, Input, LOCK_OUT_HEIGHT, Line, Notification,
-    NotificationFeed, Offset, Orientation, Piece, SoftDropRate, Stat, Tetromino, UpdateGameError,
-    WIDTH,
-};
-pub use game_building::GameBuilder;
-pub use game_modding::GameModifier;
-pub use helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
-pub use piece_rotation::{PieceRotator, StdPceRot};
-pub use tetromino_generation::{StdTetGen, TetrominoGenerator};
+pub use prelude_base::*;
+pub use prelude_generic_stdized::*;
 
-/// Standard export of the more generic [`core::Configuration`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Configuration`.
-pub type Configuration = core::Configuration;
-/// Standard export of the more generic [`core::StateInitialization`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::StateInitialization`.
-pub type StateInitialization = core::StateInitialization;
-/// Standard export of the more generic [`core::State`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::State`.
-pub type State = core::State;
-/// Standard export of the more generic [`core::Phase`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Phase`.
-pub type Phase = core::Phase;
-/// Standard export of the more generic [`core::Game`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `core::Game`.
-pub type Game = core::Game;
+pub mod prelude_base {
+    //! Non-generic base library constants, types and traits.
+    pub use crate::core::{
+        BOARD_WIDTH, Button, ButtonsState, CoordExt, Coordinate, DelayCurve, DelayCurveExt,
+        DelayParameters, DelayTable, GameEndCause, GameLimits, GameRng, InGameTime, Input,
+        MAX_BOARD_HEIGHT, Offset, Orientation, PLAYABLE_BOARD_HEIGHT, Phase, Piece, SoftDropRate,
+        Stat, Tetromino, UpdateGameError,
+    };
+    pub use crate::helper_types::{extduration::ExtDuration, extnonnegf64::ExtNonNegF64};
+    pub use crate::piece_rotation::{
+        ClassicLRot, ClassicRRot, MiscPceRots, OcularRot, PieceRotator, SuperRot,
+    };
+    pub use crate::tetromino_generation::{
+        BalanceOutGen, MiscTetGens, RecencyGen, RerollGen, StockGen, TetrominoGenerator,
+    };
+}
 
-/// Standard export of the more generic [`core::Game`] type.
-///
-/// # Note on Type Inference
-/// Importing this provides better type inference, as the generic type defaults do not always work as expected for `game_modding::GameAccess`.
-pub type GameAccess<'a> = game_modding::GameAccess<'a>;
+pub mod prelude_generic {
+    //! Re-exports of generic library types and traits.
+    pub use crate::core::{
+        Board, Configuration, Game, Line, Notification, NotificationFeed, State,
+        StateInitialization,
+    };
+    pub use crate::game_building::GameBuilder;
+    pub use crate::game_modding::{GameAccess, GameModifier};
+}
+
+pub mod prelude_generic_stdized {
+    //! Re-exports of generic library types and traits with provided defaults.
+    //!
+    //! It is encouraged to copy this sub-module to generate customized type re-exports for one's own project.
+    //!
+    //! # Note on Type Inference
+    //! Importing this provides better type inference, as adding generic type defaults to our `core` did not always work as expected as of Rust 1.95.0.
+    //
+    // # Examples
+    //
+    // ```ignore
+    // // Assume this imaginary `core` defines: `pub struct Game<TetGen = StdTetGen, PceRot = StdPceRot, TileData = Tetromino> { .. };`.
+    // use falling_tetromino_engine::core;
+    //
+    // let ex1 = core::Game::new(); // ERROR - Type inference failed despite defaults for each generic parameter in original struct def.
+    //
+    // let ex2: core::Game = core::Game::new(); // Ok
+    // let ex3 = <core::Game>::new(); // Ok
+    //
+    // type CoreGame = core::Game;
+    // let ex4 = CoreGame::new(); // Ok
+    // ```
+    //
+    // ```rs
+    // use falling_tetromino_engine::std_generic_types_prelude as nice;
+    //
+    // let ex5 = nice::Game::new();
+    // ```
+    #![allow(missing_docs)]
+
+    use crate::prelude_base::{MiscPceRots, MiscTetGens, Tetromino};
+    use crate::prelude_generic;
+
+    type StdTetGen = MiscTetGens;
+    type StdPceRot = MiscPceRots;
+    type StdTileData = Tetromino;
+
+    pub type Board = prelude_generic::Board<StdTileData>;
+    pub type Line = prelude_generic::Line<StdTileData>;
+    pub type Notification = prelude_generic::Notification<StdTileData>;
+    pub type NotificationFeed = prelude_generic::NotificationFeed<StdTileData>;
+    pub type GameBuilder = prelude_generic::GameBuilder<StdTetGen, StdPceRot, StdTileData>;
+    pub type Configuration = prelude_generic::Configuration<StdPceRot>;
+    pub type StateInitialization = prelude_generic::StateInitialization<StdTetGen>;
+    pub type State = prelude_generic::State<StdTetGen, StdTileData>;
+    pub type Game = prelude_generic::Game<StdTetGen, StdPceRot, StdTileData>;
+    pub type GameAccess<'a> = prelude_generic::GameAccess<'a, StdTetGen, StdPceRot, StdTileData>;
+
+    // FIXME: This should be made possible using trait aliases or so.
+    // pub trait GameModifier = prelude_generic::GameModifier<StdTetGen, StdPceRot, StdTileData>;
+    pub use prelude_generic::GameModifier;
+}

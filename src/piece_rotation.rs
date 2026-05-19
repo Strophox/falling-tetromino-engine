@@ -2,7 +2,7 @@
 Rotation of tetromino [`Piece`]s.
 */
 
-use crate::{Board, CoordAdd, Offset, Orientation, Piece, Tetromino};
+use crate::core::{Board, CoordExt, Offset, Orientation, Piece, Tetromino};
 
 /// Handles the logic of how to rotate a tetromino in play.
 pub trait PieceRotator {
@@ -13,7 +13,12 @@ pub trait PieceRotator {
     /// It should return `None` otherwise.
     ///
     /// In particular, rotating a piece `0` times tests whether piece fits in its *current* position.
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece>;
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece>;
 
     /// This rotates the piece as if it were in free space ('completely freely').
     /// This should correspond to [`PieceRotator::rotate`] if the first kick never fails.
@@ -23,7 +28,7 @@ pub trait PieceRotator {
 /// Standard piece rotator implementations.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum StdPceRot {
+pub enum MiscPceRots {
     /// The 'Ocular' rotation system.
     #[default]
     Ocular,
@@ -35,22 +40,27 @@ pub enum StdPceRot {
     Super,
 }
 
-impl PieceRotator for StdPceRot {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+impl PieceRotator for MiscPceRots {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         match self {
-            StdPceRot::Ocular => OcularRot.rotate(piece, board, right_turns),
-            StdPceRot::ClassicL => ClassicLRot.rotate(piece, board, right_turns),
-            StdPceRot::ClassicR => ClassicRRot.rotate(piece, board, right_turns),
-            StdPceRot::Super => SuperRot.rotate(piece, board, right_turns),
+            MiscPceRots::Ocular => OcularRot.rotate(piece, board, right_turns),
+            MiscPceRots::ClassicL => ClassicLRot.rotate(piece, board, right_turns),
+            MiscPceRots::ClassicR => ClassicRRot.rotate(piece, board, right_turns),
+            MiscPceRots::Super => SuperRot.rotate(piece, board, right_turns),
         }
     }
 
     fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
         match self {
-            StdPceRot::Ocular => ocular_rotate(piece, None, right_turns),
-            StdPceRot::ClassicL => classic_rotate(piece, None, right_turns, true),
-            StdPceRot::ClassicR => classic_rotate(piece, None, right_turns, false),
-            StdPceRot::Super => super_rotate(piece, None, right_turns),
+            MiscPceRots::Ocular => ocular_rotate::<()>(piece, None, right_turns),
+            MiscPceRots::ClassicL => classic_rotate::<()>(piece, None, right_turns, true),
+            MiscPceRots::ClassicR => classic_rotate::<()>(piece, None, right_turns, false),
+            MiscPceRots::Super => super_rotate::<()>(piece, None, right_turns),
         }
         .unwrap()
     }
@@ -62,12 +72,17 @@ impl PieceRotator for StdPceRot {
 pub struct ClassicLRot;
 
 impl PieceRotator for ClassicLRot {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         classic_rotate(piece, Some(board), right_turns, true)
     }
 
     fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
-        classic_rotate(piece, None, right_turns, true).unwrap()
+        classic_rotate::<()>(piece, None, right_turns, true).unwrap()
     }
 }
 
@@ -77,18 +92,23 @@ impl PieceRotator for ClassicLRot {
 pub struct ClassicRRot;
 
 impl PieceRotator for ClassicRRot {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         classic_rotate(piece, Some(board), right_turns, false)
     }
 
     fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
-        classic_rotate(piece, None, right_turns, false).unwrap()
+        classic_rotate::<()>(piece, None, right_turns, false).unwrap()
     }
 }
 
-fn classic_rotate(
+fn classic_rotate<TileData>(
     piece: &Piece,
-    board: Option<&Board>,
+    board: Option<&Board<TileData>>,
     right_turns: i8,
     is_l_not_r: bool,
 ) -> Option<Piece> {
@@ -146,16 +166,25 @@ fn classic_rotate(
 pub struct SuperRot;
 
 impl PieceRotator for SuperRot {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         super_rotate(piece, Some(board), right_turns)
     }
 
     fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
-        super_rotate(piece, None, right_turns).unwrap()
+        super_rotate::<()>(piece, None, right_turns).unwrap()
     }
 }
 
-fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option<Piece> {
+fn super_rotate<TileData>(
+    piece: &Piece,
+    board: Option<&Board<TileData>>,
+    right_turns: i8,
+) -> Option<Piece> {
     use Orientation::*;
 
     #[rustfmt::skip]
@@ -220,12 +249,17 @@ fn super_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option
 pub struct OcularRot;
 
 impl PieceRotator for OcularRot {
-    fn rotate(&self, piece: &Piece, board: &Board, right_turns: i8) -> Option<Piece> {
+    fn rotate<TileData>(
+        &self,
+        piece: &Piece,
+        board: &Board<TileData>,
+        right_turns: i8,
+    ) -> Option<Piece> {
         ocular_rotate(piece, Some(board), right_turns)
     }
 
     fn free_rotate(&self, piece: &Piece, right_turns: i8) -> Piece {
-        ocular_rotate(piece, None, right_turns).unwrap()
+        ocular_rotate::<()>(piece, None, right_turns).unwrap()
     }
 }
 
@@ -258,7 +292,7 @@ Given we know how  L(↑→↓←)↺↻  then we can figure out [all of J]:
     J(→←)↺↻  :=  ⇔ L(←→)↻↺"
 */
 #[rustfmt::skip]
-fn ocular_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Option<Piece> {
+fn ocular_rotate<TileData>(piece: &Piece, board: Option<&Board<TileData>>, right_turns: i8) -> Option<Piece> {
     use Orientation::*;
 
     // Figure out whether to turn 'right' (90° CW), 'left' (90° CCW), 'around' (180°) or not at all (0°).
@@ -280,10 +314,10 @@ fn ocular_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Optio
 
             let unadjusted_kicks = 'lookup: loop {
                 break match lookup_tetromino {
-                    
+
                     // Note: O and I have a default, successful 180° rotation due to 180° symmetry.
                     Tetromino::O | Tetromino::I => &[( 0, 0)][..],
-                    
+
                     // Note: S has special 180° rotations that can 'nudge' it diagonally into fitting gaps.
                     // Note: S has a default, successful 180° rotation due to 180° symmetry.
                     Tetromino::S => match lookup_orientation {
@@ -297,7 +331,7 @@ fn ocular_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Optio
                         apply_mirror = true;
                         continue 'lookup;
                     },
-                    
+
                     Tetromino::T => match lookup_orientation {
                         N => &[( 0,-1), ( 0, 0)][..],
                         E => &[(-1, 0), ( 0, 0), (-1,-1)],
@@ -316,7 +350,7 @@ fn ocular_rotate(piece: &Piece, board: Option<&Board>, right_turns: i8) -> Optio
                         S => &[( 0, 1), ( 0, 0), (-1, 1), (-1, 0)],
                         W => &[( 1, 0), ( 0, 0), ( 1,-1), ( 1, 1), ( 0, 1)],
                     },
-                    
+
                     Tetromino::J => {
                         // Symmetry: J's 180° rotation is a mirrored version of L's.
                         lookup_tetromino = Tetromino::L;

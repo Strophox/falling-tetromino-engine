@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *NOTE: Listed unreleased changes might not be comprehensive. Check using `git diff vX.Y.Z HEAD` with latest `vX.Y.Z`.*
 
 
+## [10.0.0] - 2026-05-19
+
+### Changed
+- Generalized `TileData` in `Game` and others; The game can now hold custom tile data.
+- `lib.rs` has changed its exports: `prelude_base` exports non-generic types, constants, traits, `prelude_generic` all the rest, and `prelude_generic_stdized` the same generic types but with reasonable defaults chosen.
+- `Board` is now a `Vec<(line, is_frozen)>` instead of a `[Line; BOARD_HEIGHT]`.
+- Lines can now be 'frozen', which means they are not cleared even if they happen to be full.
+- Many renames. (TODO: List explicitly for correctness.)
+
+### Fixed
+- Piece locks after Hard Drop now, which didn't happen before when movement button was held and prompted an autoshift to occur first.
+
+### Removed
+- `type TileID = u8`
+
+
 ## [9.0.0] - 2026-05-04
 
 ### Added

@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *NOTE: Listed unreleased changes might not be comprehensive. Check using `git diff vX.Y.Z HEAD` with latest `vX.Y.Z`.*
 
 
+## [11.0.0] - 2026-05-28
+
+### Changed
+- Lock delay now correctly stays at start/base value until fall delay is done decreasing.
+
+
 ## [10.0.0] - 2026-05-19
 
 ### Changed

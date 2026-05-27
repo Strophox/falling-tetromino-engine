@@ -1368,8 +1368,8 @@ pub fn update_fall_and_lock_delays<TetGen, PceRot, TileData>(
 
         if let Some(lock_curve) = &config.lock_delay_curve {
             // If lock delay does have its own curve, update lock delay to fall delay if that is longer
-            let (lock_delay, _) = lock_curve
-                .retrieve_and_check(state.lineclears, config.update_delays_every_n_lineclears);
+            let (lock_delay, _) =
+                lock_curve.retrieve_and_check(0, config.update_delays_every_n_lineclears);
             state.lock_delay = lock_delay.max(state.fall_delay);
         } else {
             // If lock delay does not have its own curve, it is equal to the fall delay.

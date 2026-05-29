@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *NOTE: Listed unreleased changes might not be comprehensive. Check using `git diff vX.Y.Z HEAD` with latest `vX.Y.Z`.*
 
 
+## [12.0.0] - 2026-05-30
+
+### Changed
+- Game update loop is now correctly continued in case a game modifier hooks on GameEnd and changes the game Phase.
+
+### Fixed
+- Game Over notifications are not sent anymore when config.send_notifs is turned off.
+
+
 ## [11.0.0] - 2026-05-28
 
 ### Changed

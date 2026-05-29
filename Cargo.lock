@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "falling-tetromino-engine"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "crossterm",
  "either",

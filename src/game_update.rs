@@ -79,13 +79,16 @@ impl<TetGen: TetrominoGenerator, PceRot: PieceRotator, TileData: Clone + From<Te
             is_win: false,
         };
 
-        let mut feed = vec![(
-            Notification::GameEnded {
-                cause: GameEndCause::Forfeit { piece_in_play },
-                is_win: false,
-            },
-            self.state.time,
-        )];
+        let mut feed = Vec::new();
+        if self.config.send_notifications {
+            feed.push((
+                Notification::GameEnded {
+                    cause: GameEndCause::Forfeit { piece_in_play },
+                    is_win: false,
+                },
+                self.state.time,
+            ));
+        }
 
         self.run_mods(Hook::GameEnded, &mut feed);
 
@@ -183,15 +186,19 @@ impl<TetGen: TetrominoGenerator, PceRot: PieceRotator, TileData: Clone + From<Te
                 // Return immediately and with accumulated messages.
                 Phase::GameEnd { ref cause, is_win } => {
                     // Add message that game ended.
-                    feed.push((
-                        Notification::GameEnded {
-                            cause: cause.clone(),
-                            is_win,
-                        },
-                        self.state.time,
-                    ));
+                    if self.config.send_notifications {
+                        feed.push((
+                            Notification::GameEnded {
+                                cause: cause.clone(),
+                                is_win,
+                            },
+                            self.state.time,
+                        ));
+                    }
                     self.run_mods(Hook::GameEnded, &mut feed);
-                    return Ok(feed);
+                    if self.has_ended() {
+                        return Ok(feed);
+                    }
                 }
 
                 // Lines clearing.
